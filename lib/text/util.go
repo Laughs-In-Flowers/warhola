@@ -6,7 +6,6 @@ import (
 	"golang.org/x/image/draw"
 	"golang.org/x/image/math/f64"
 	"golang.org/x/image/math/fixed"
-	//m "github.com/Laughs-In-Flowers/warhola/lib/math"
 )
 
 func Flatten(t draw.Interpolator, images ...draw.Image) draw.Image {

@@ -1,109 +1,130 @@
-package warhola
+package main
 
 import (
-	"image"
-	"image/color"
+	"context"
+	"fmt"
 	"image/draw"
+	"path/filepath"
+	"strings"
+
+	"github.com/Laughs-In-Flowers/flip"
+	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
+	"github.com/Laughs-In-Flowers/warhola/lib/factory"
+	"github.com/Laughs-In-Flowers/warhola/lib/star"
 )
 
-type Canvas interface {
-	draw.Image
-	Path() string
-	Apply(*StarArgs, ...Star) error
-	Save() error
+type cOptions struct {
+	New                                               bool
+	Directory, Tag, Color, Extension, Stars, StarArgs string
+	X, Y                                              int
 }
 
-type canvas struct {
-	tag, path string
-	model     color.Model
-	draw.Image
+func (o *cOptions) File() string {
+	return fmt.Sprintf("%s.%s", o.Tag, o.Extension)
 }
 
-func New(path string, i image.Image, c color.Model) Canvas {
-	_, tag, _ := splitPath(path)
-	ni := Clone(i, c)
-	SaveImage(path, ni)
-	return &canvas{
-		tag, path, c, ni,
-	}
+func (o *cOptions) Path() string {
+	return filepath.Join(o.Directory, o.File())
 }
 
-func Open(path string, c color.Model) (Canvas, error) {
-	i, err := OpenImage(path, c)
-	if err != nil {
-		return nil, err
-	}
-	return New(path, i, c), nil
-}
-
-func OpenAll(paths []string, m color.Model) ([]Canvas, error) {
-	var ret []Canvas
-	for _, p := range paths {
-		c, err := Open(p, m)
+func loadStars(o *cOptions) ([]star.Star, error) {
+	var ret []star.Star
+	ss := strings.Split(o.Stars, ",")
+	for _, s := range ss {
+		st, err := star.Load(s)
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, c)
+		ret = append(ret, st)
 	}
 	return ret, nil
 }
 
-func (c *canvas) Path() string {
-	return c.path
+var defaultCanvasOptions = cOptions{false, ".", "TAG", "RGBA", "png", "", "", 100, 100}
+
+const canvasUse = `Create and manipulate individual canvases.`
+
+func canvasFlags(o *cOptions) *flip.FlagSet {
+	fs := flip.NewFlagSet("canvas", flip.ContinueOnError)
+	fs.BoolVar(&o.New, "new", o.New, "Create a new canvas.")
+	fs.StringVar(&o.Directory, "directory", o.Directory, "The directory of the canvas.")
+	fs.StringVar(&o.Tag, "tag", o.Tag, "The name tag of the canvas.")
+	fs.StringVar(&o.Color, "color", o.Color, "The color model of the canvas. [GRAY|ALPHA|RGBA|RGBA64|NRGBA|NRGBA64|CMYK]")
+	fs.StringVar(&o.Extension, "extension", o.Extension, "The file extension for the canvas. [png|jpeg]")
+	fs.StringVar(&o.Stars, "stars", o.Stars, "A comma delimited list of stars to apply to the canvas.")
+	fs.StringVar(&o.StarArgs, "starArgs", o.StarArgs, "A comma delimited list of key:value args used by the stars.")
+	fs.IntVar(&o.X, "X", o.X, "X dimension of the canvas.")
+	fs.IntVar(&o.Y, "Y", o.Y, "Y dimension of the canvas.")
+	return fs
 }
 
-func (c *canvas) Apply(args *StarArgs, rs ...Star) error {
-	for _, star := range rs {
-		err := star.Apply(args)
-		if err != nil {
-			return err
+func starArgs(o *cOptions) *star.Args {
+	path := o.Path()
+	args := strings.Split(o.StarArgs, ",")
+	return star.NewArgs(path, false, args...)
+}
+
+func fResult(cause, path string, err error, f *factory.Factory) flip.ExitStatus {
+	f.Printf("%s at %s error: %s", cause, path, err)
+	return flip.ExitFailure
+}
+
+func sResult(cause, path string, f *factory.Factory) flip.ExitStatus {
+	f.Printf("%s at %s successful.", cause, path)
+	return flip.ExitSuccess
+}
+
+func canvasCommand(o *cOptions) flip.ExecutionFunc {
+	return func(c context.Context, a []string) flip.ExitStatus {
+		path := o.Path()
+		cm := canvas.StringToColorModel(o.Color)
+		var action string
+		var im draw.Image
+		switch {
+		case o.New:
+			action = "create new canvas"
+			im = canvas.NewFrom(cm, o.X, o.Y)
+		default:
+			action = "open existing canvas"
+			var oe error
+			im, oe = canvas.OpenImage(path, cm)
+			if oe != nil {
+				return fResult(action, path, oe, f)
+			}
 		}
+		cv := canvas.New(path, im, cm)
+		if o.Stars != "" {
+			args := starArgs(o)
+			stars, err := loadStars(o)
+			if err != nil {
+				return fResult("load stars", path, err, f)
+			}
+			err = cv.Apply(args, stars...)
+			if err != nil {
+				return fResult("apply stars", path, err, f)
+			}
+		}
+		if err := cv.Save(); err != nil {
+			return fResult("save canvas", path, err, f)
+		}
+		return sResult(action, path, f)
 	}
-
-	ni, err := OpenImage(c.path, c.model)
-	if err != nil {
-		return err
-	}
-
-	c.Image = ni
-
-	return nil
 }
 
-func (c *canvas) Save() error {
-	return SaveImage(c.path, c.Image)
+func CanvasCommand() flip.Command {
+	so := &defaultCanvasOptions
+	fs := canvasFlags(so)
+	cmd := canvasCommand(so)
+	return flip.NewCommand(
+		"",
+		"canvas",
+		canvasUse,
+		1,
+		cmd,
+		fs,
+	)
 }
-
-type Canvaser interface {
-	NewCanvas(string, image.Image, color.Model) Canvas
-	OpenCanvas(string, color.Model) (Canvas, error)
-	OpenCanvases([]string, color.Model) ([]Canvas, error)
-}
-
-type canvaser struct {
-	nfn func(string, image.Image, color.Model) Canvas
-	ofn func(string, color.Model) (Canvas, error)
-	afn func([]string, color.Model) ([]Canvas, error)
-}
-
-func NewCanvaser() Canvaser {
-	return &canvaser{New, Open, OpenAll}
-}
-
-func (c *canvaser) NewCanvas(p string, i image.Image, m color.Model) Canvas {
-	return c.nfn(p, i, m)
-}
-
-func (c *canvaser) OpenCanvas(p string, m color.Model) (Canvas, error) {
-	return c.ofn(p, m)
-}
-
-func (c *canvaser) OpenCanvases(p []string, m color.Model) ([]Canvas, error) {
-	return c.afn(p, m)
-}
-
-var DefaultCanvaser Canvaser
 
 func init() {
-	DefaultCanvaser = NewCanvaser()
+	flip.RegisterGroup("canvas", 10, CanvasCommand())
 }

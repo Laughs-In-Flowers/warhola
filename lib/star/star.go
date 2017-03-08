@@ -1,4 +1,4 @@
-package warhola
+package star
 
 import (
 	"fmt"
@@ -15,10 +15,10 @@ import (
 
 type Star interface {
 	Tag() string
-	Apply(*StarArgs) error
+	Apply(*Args) error
 }
 
-type StarArgs struct {
+type Args struct {
 	Path  string
 	Args  map[string]string
 	Debug bool
@@ -35,16 +35,16 @@ func parseArgs(args ...string) map[string]string {
 	return m
 }
 
-func NewStarArgs(path string, debug bool, args ...string) *StarArgs {
+func NewArgs(path string, debug bool, args ...string) *Args {
 	m := parseArgs(args...)
-	return &StarArgs{
+	return &Args{
 		Path:  path,
 		Args:  m,
 		Debug: debug,
 	}
 }
 
-type StarResult struct {
+type Result struct {
 	Exit  int
 	Error error
 }
@@ -80,7 +80,7 @@ func (s *starPlugin) fmtCall(c string) string {
 	return fmt.Sprintf("%s.%s", s.tag, c)
 }
 
-func (s *starPlugin) Apply(args *StarArgs) error {
+func (s *starPlugin) Apply(args *Args) error {
 	if s.Client == nil {
 		client, err := plugin.StartCodec(
 			jsonrpc.NewClientCodec,
@@ -93,7 +93,7 @@ func (s *starPlugin) Apply(args *StarArgs) error {
 		defer client.Close()
 		s.Client = client
 	}
-	var result StarResult
+	var result Result
 	err := s.Call(s.fmtCall("Apply"), args, &result)
 	if err != nil {
 		return err

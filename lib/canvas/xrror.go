@@ -1,4 +1,4 @@
-package warhola
+package canvas
 
 import (
 	"fmt"

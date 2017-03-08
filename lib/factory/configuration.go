@@ -1,17 +1,18 @@
-package warhola
+package factory
 
 import (
 	"os"
 	"sort"
 
 	"github.com/Laughs-In-Flowers/log"
+	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
 )
 
-type ConfigFn func(*Env) error
+type ConfigFn func(*Factory) error
 
 type Config interface {
 	Order() int
-	Configure(*Env) error
+	Configure(*Factory) error
 }
 
 type config struct {
@@ -31,8 +32,8 @@ func (c config) Order() int {
 	return c.order
 }
 
-func (c config) Configure(e *Env) error {
-	return c.fn(e)
+func (c config) Configure(f *Factory) error {
+	return c.fn(f)
 }
 
 type configList []Config
@@ -57,14 +58,14 @@ type Configuration interface {
 }
 
 type configuration struct {
-	e          *Env
+	f          *Factory
 	configured bool
 	list       configList
 }
 
-func newConfiguration(e *Env, conf ...Config) *configuration {
+func newConfiguration(f *Factory, conf ...Config) *configuration {
 	c := &configuration{
-		e:    e,
+		f:    f,
 		list: builtIns,
 	}
 	c.Add(conf...)
@@ -81,9 +82,9 @@ func (c *configuration) AddFn(fns ...ConfigFn) {
 	}
 }
 
-func configure(e *Env, conf ...Config) error {
+func configure(f *Factory, conf ...Config) error {
 	for _, c := range conf {
-		err := c.Configure(e)
+		err := c.Configure(f)
 		if err != nil {
 			return err
 		}
@@ -94,7 +95,7 @@ func configure(e *Env, conf ...Config) error {
 func (c *configuration) Configure() error {
 	sort.Sort(c.list)
 
-	err := configure(c.e, c.list...)
+	err := configure(c.f, c.list...)
 	if err == nil {
 		c.configured = true
 	}
@@ -107,30 +108,30 @@ func (c *configuration) Configured() bool {
 }
 
 var builtIns = []Config{
-	config{1001, eLogger},
-	config{1002, eCanvaser},
+	config{1001, fLogger},
+	config{1002, fCanvaser},
 }
 
-func eLogger(e *Env) error {
-	if e.Logger == nil {
+func fLogger(f *Factory) error {
+	if f.Logger == nil {
 		l := log.New(os.Stdout, log.LInfo, log.DefaultNullFormatter())
 		log.Current = l
-		e.Logger = l
+		f.Logger = l
 	}
 	return nil
 }
 
-func eCanvaser(e *Env) error {
-	if e.Canvaser == nil {
-		e.Canvaser = DefaultCanvaser
+func fCanvaser(f *Factory) error {
+	if f.Canvaser == nil {
+		f.Canvaser = canvas.DefaultCanvaser
 	}
 	return nil
 }
 
 func SetLogger(l log.Logger) Config {
-	return DefaultConfig(func(e *Env) error {
+	return DefaultConfig(func(f *Factory) error {
 		log.Current = l
-		e.Logger = l
+		f.Logger = l
 		return nil
 	})
 }
