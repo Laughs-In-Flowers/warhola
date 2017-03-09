@@ -1,109 +1,171 @@
 package star
 
 import (
-	"fmt"
-	"log"
-	"net/rpc"
-	"net/rpc/jsonrpc"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-
-	"github.com/Laughs-In-Flowers/plugin"
+	"plugin"
 )
-
-type Star interface {
-	Tag() string
-	Apply(*Args) error
-}
 
 type Args struct {
 	Path  string
-	Args  map[string]string
+	Args  []string
 	Debug bool
 }
 
-func parseArgs(args ...string) map[string]string {
-	m := make(map[string]string)
-	for _, v := range args {
-		spl := strings.Split(v, ":")
-		if len(spl) == 2 {
-			m[spl[0]] = spl[1]
-		}
-	}
-	return m
-}
-
 func NewArgs(path string, debug bool, args ...string) *Args {
-	m := parseArgs(args...)
 	return &Args{
 		Path:  path,
-		Args:  m,
+		Args:  args,
 		Debug: debug,
 	}
 }
 
-type Result struct {
-	Exit  int
-	Error error
+type Star func(string, bool, ...string) error
+
+type Loader interface {
+	PluginDirectory() string
+	Plugins() ([]string, error)
+	Load() error
+	Get(...string) ([]Star, error)
 }
 
-type starPlugin struct {
-	tag, path string
-	*rpc.Client
+type loader struct {
+	pluginsDir string
+	plugins    map[string]Star
+}
+
+var PluginsDirCreateError = Xrror("could not create plugins dir: %v").Out
+
+func defaultDir(tag string) (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", PluginsDirCreateError(err)
+	}
+	pDir := filepath.Join(wd, tag)
+	_, err = os.Stat(pDir)
+	if err != nil {
+		err = os.Mkdir(pDir, 0755)
+		if err != nil {
+			return "", PluginsDirCreateError(err)
+		}
+	}
+	return pDir, nil
+}
+
+var FileDoesNotExist = Xrror("file does not exist: %s").Out
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+func New(pluginsDir string) (*loader, error) {
+	if !fileExists(pluginsDir) {
+		pDir, err := defaultDir("plugins")
+		if err != nil {
+			return nil, err
+		}
+		pluginsDir = pDir
+	}
+
+	return &loader{
+		pluginsDir,
+		make(map[string]Star),
+	}, nil
+}
+
+func (l *loader) PluginDirectory() string {
+	return l.pluginsDir
+}
+
+func (l *loader) Plugins() ([]string, error) {
+	dir, err := os.Open(l.pluginsDir)
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return nil, err
+	}
+
+	var res []string
+	for _, name := range names {
+		if filepath.Ext(name) == ".so" {
+			res = append(res, name)
+		}
+	}
+	return res, nil
+}
+
+func (l *loader) Load() error {
+	var plugins []string
+	var err error
+	plugins, err = l.Plugins()
+	if err != nil {
+		return err
+	}
+	var srcPath string
+	for _, p := range plugins {
+		srcPath = filepath.Join(l.PluginDirectory(), p)
+		err = load(l, srcPath)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var (
+	OpenPluginError  = Xrror("Unable to open plugin at %s: %s").Out
+	DoesntExistError = Xrror("Plugin at %s has no %s.").Out
+)
+
+func load(l *loader, path string) error {
+	p, err := plugin.Open(path)
+	if err != nil {
+		return OpenPluginError(path, err)
+	}
+	u1, err := p.Lookup("PluginName")
+	if err != nil {
+		return DoesntExistError(path, "name")
+	}
+	u2, err := p.Lookup("Apply")
+	if err != nil {
+		return DoesntExistError(path, "apply function")
+	}
+
+	var key *string
+	var value func(string, bool, ...string) error
+	var ok bool
+
+	if key, ok = u1.(*string); !ok {
+		return OpenPluginError(path, "error with plugin name")
+	}
+
+	if value, ok = u2.(func(string, bool, ...string) error); !ok {
+		return OpenPluginError(path, "error with plugin apply function")
+	}
+
+	l.plugins[*key] = value
+
+	return nil
 }
 
 var StarDoesNotExistError = Xrror("star does not exist: %s").Out
 
-func Load(path string) (Star, error) {
-	_, err := exec.LookPath(path)
-	if err != nil {
-		return nil, StarDoesNotExistError(err.Error())
-	}
-	tag := filepath.Base(path)
-	return newStarPlugin(tag, path), nil
-}
-
-func newStarPlugin(tag, path string) *starPlugin {
-	return &starPlugin{
-		tag:  tag,
-		path: path,
-	}
-}
-
-func (s *starPlugin) Tag() string {
-	return s.tag
-}
-
-func (s *starPlugin) fmtCall(c string) string {
-	return fmt.Sprintf("%s.%s", s.tag, c)
-}
-
-func (s *starPlugin) Apply(args *Args) error {
-	if s.Client == nil {
-		client, err := plugin.StartCodec(
-			jsonrpc.NewClientCodec,
-			os.Stderr,
-			s.path,
-		)
-		if err != nil {
-			return err
+func (l *loader) Get(tags ...string) ([]Star, error) {
+	var ret []Star
+	for _, t := range tags {
+		var st Star
+		var ok bool
+		if st, ok = l.plugins[t]; !ok {
+			return nil, StarDoesNotExistError(t)
 		}
-		defer client.Close()
-		s.Client = client
+		ret = append(ret, st)
 	}
-	var result Result
-	err := s.Call(s.fmtCall("Apply"), args, &result)
-	if err != nil {
-		return err
-	}
-	if result.Exit != 0 {
-		log.Fatalf("warhola star %s result returned a non zero exit code: %d", s.tag, result.Exit)
-	}
-	if result.Error != nil {
-		return result.Error
-	}
-	s.Client = nil
-	return nil
+	return ret, nil
 }

@@ -26,8 +26,10 @@ _testmain.go
 Godeps/*
 !Godeps/Godeps.json
 
+warhola
 warhola/warhola
-stars
+stars/*
+plugins/*
 _back
 *.out
 *.old.*

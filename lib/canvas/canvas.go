@@ -55,8 +55,8 @@ func (c *canvas) Path() string {
 }
 
 func (c *canvas) Apply(args *star.Args, rs ...star.Star) error {
-	for _, star := range rs {
-		err := star.Apply(args)
+	for _, st := range rs {
+		err := st(args.Path, args.Debug, args.Args...)
 		if err != nil {
 			return err
 		}

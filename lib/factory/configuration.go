@@ -6,6 +6,7 @@ import (
 
 	"github.com/Laughs-In-Flowers/log"
 	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
+	"github.com/Laughs-In-Flowers/warhola/lib/star"
 )
 
 type ConfigFn func(*Factory) error
@@ -110,6 +111,7 @@ func (c *configuration) Configured() bool {
 var builtIns = []Config{
 	config{1001, fLogger},
 	config{1002, fCanvaser},
+	config{1003, fStars},
 }
 
 func fLogger(f *Factory) error {
@@ -128,10 +130,17 @@ func fCanvaser(f *Factory) error {
 	return nil
 }
 
-func SetLogger(l log.Logger) Config {
-	return DefaultConfig(func(f *Factory) error {
-		log.Current = l
-		f.Logger = l
-		return nil
-	})
+func fStars(f *Factory) error {
+	if f.Loader == nil {
+		l, err := star.New("")
+		if err != nil {
+			return err
+		}
+		err = l.Load()
+		if err != nil {
+			return err
+		}
+		f.Loader = l
+	}
+	return nil
 }

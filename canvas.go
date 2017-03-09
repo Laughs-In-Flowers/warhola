@@ -28,16 +28,13 @@ func (o *cOptions) Path() string {
 }
 
 func loadStars(o *cOptions) ([]star.Star, error) {
-	var ret []star.Star
 	ss := strings.Split(o.Stars, ",")
-	for _, s := range ss {
-		st, err := star.Load(s)
-		if err != nil {
-			return nil, err
-		}
-		ret = append(ret, st)
+	stars, exists := F.Get(ss...)
+	if exists != nil {
+		return nil, exists
 	}
-	return ret, nil
+
+	return stars, nil
 }
 
 var defaultCanvasOptions = cOptions{false, ".", "TAG", "RGBA", "png", "", "", 100, 100}
@@ -59,9 +56,8 @@ func canvasFlags(o *cOptions) *flip.FlagSet {
 }
 
 func starArgs(o *cOptions) *star.Args {
-	path := o.Path()
 	args := strings.Split(o.StarArgs, ",")
-	return star.NewArgs(path, false, args...)
+	return star.NewArgs(o.Path(), false, args...)
 }
 
 func fResult(cause, path string, err error, f *factory.Factory) flip.ExitStatus {
@@ -89,7 +85,7 @@ func canvasCommand(o *cOptions) flip.ExecutionFunc {
 			var oe error
 			im, oe = canvas.OpenImage(path, cm)
 			if oe != nil {
-				return fResult(action, path, oe, f)
+				return fResult(action, path, oe, F)
 			}
 		}
 		cv := canvas.New(path, im, cm)
@@ -97,17 +93,17 @@ func canvasCommand(o *cOptions) flip.ExecutionFunc {
 			args := starArgs(o)
 			stars, err := loadStars(o)
 			if err != nil {
-				return fResult("load stars", path, err, f)
+				return fResult("load stars", path, err, F)
 			}
 			err = cv.Apply(args, stars...)
 			if err != nil {
-				return fResult("apply stars", path, err, f)
+				return fResult("apply stars", path, err, F)
 			}
 		}
 		if err := cv.Save(); err != nil {
-			return fResult("save canvas", path, err, f)
+			return fResult("save canvas", path, err, F)
 		}
-		return sResult(action, path, f)
+		return sResult(action, path, F)
 	}
 }
 
