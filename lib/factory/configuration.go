@@ -132,11 +132,8 @@ func fCanvaser(f *Factory) error {
 
 func fStars(f *Factory) error {
 	if f.Loader == nil {
-		l, err := star.New("")
-		if err != nil {
-			return err
-		}
-		err = l.Load()
+		l := star.Current
+		err := l.Load()
 		if err != nil {
 			return err
 		}

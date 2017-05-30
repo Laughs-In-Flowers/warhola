@@ -10,14 +10,26 @@ import (
 	"github.com/Laughs-In-Flowers/warhola/lib/factory"
 )
 
-func tExecute(o *tOptions, c context.Context, a []string) flip.ExitStatus {
+type Options struct {
+	*tOptions
+	*cOptions
+}
+
+func defaultOptions() *Options {
+	return &Options{
+		&defaultTopOptions,
+		&defaultCanvasOptions,
+	}
+}
+
+func tExecute(o *Options, c context.Context, a []string) flip.ExitStatus {
 	for _, fn := range executing {
 		fn(o)
 	}
 	return flip.ExitNo
 }
 
-type execution func(o *tOptions)
+type execution func(o *Options)
 
 var executing = []execution{
 	logSetting,
@@ -27,16 +39,18 @@ type tOptions struct {
 	LogFormatter string
 }
 
-var defaultOptions tOptions = tOptions{"null"}
+var defaultTopOptions tOptions = tOptions{"null"}
 
-func tFlags(fs *flip.FlagSet, o *tOptions) *flip.FlagSet {
+func tFlags(fs *flip.FlagSet, o *Options) *flip.FlagSet {
 	fs.StringVar(&o.LogFormatter, "formatter", o.LogFormatter, "Specify the log formatter.")
 	return fs
 }
 
-func logSetting(o *tOptions) {
+func logSetting(o *Options) {
 	if o.LogFormatter != "null" {
 		switch o.LogFormatter {
+		case "raw":
+			F.SwapFormatter(log.GetFormatter("raw"))
 		case "text", "stdout":
 			F.SwapFormatter(log.GetFormatter("warhola_text"))
 		}
@@ -45,9 +59,7 @@ func logSetting(o *tOptions) {
 
 func TopCommand() flip.Command {
 	fs := flip.NewFlagSet("top", flip.ContinueOnError)
-
-	eo := &defaultOptions
-	fs = tFlags(fs, eo)
+	fs = tFlags(fs, O)
 
 	return flip.NewCommand(
 		"",
@@ -55,7 +67,7 @@ func TopCommand() flip.Command {
 		"Top level flag usage.",
 		1,
 		func(c context.Context, a []string) flip.ExitStatus {
-			return tExecute(eo, c, a)
+			return tExecute(O, c, a)
 		},
 		fs,
 	)
@@ -69,15 +81,18 @@ var (
 )
 
 var (
+	O *Options
 	F *factory.Factory
 	C *flip.Commander
 )
 
 func init() {
+	O = defaultOptions()
 	log.SetFormatter("warhola_text", log.MakeTextFormatter(versionPackage))
 	F = factory.Current
 	C = flip.BaseWithVersion(versionPackage, versionTag, versionHash, versionDate)
 	C.RegisterGroup("top", -1, TopCommand())
+	C.RegisterGroup("canvas", 10, CanvasCommand())
 }
 
 func main() {

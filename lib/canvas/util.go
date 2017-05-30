@@ -12,9 +12,11 @@ import (
 	"strings"
 )
 
-type fileExtension int
+// A package level representation of a file type.
+type FileExtension int
 
-func (f fileExtension) String() string {
+// A method satisfying any String interface for a FileExtension.
+func (f FileExtension) String() string {
 	switch f {
 	case JPG:
 		return "JPG"
@@ -24,7 +26,7 @@ func (f fileExtension) String() string {
 	return ""
 }
 
-func stringToFileExtension(f string) fileExtension {
+func stringToFileExtension(f string) FileExtension {
 	switch strings.ToUpper(f) {
 	case "JPG", "JPEG":
 		return JPG
@@ -35,10 +37,11 @@ func stringToFileExtension(f string) fileExtension {
 }
 
 const (
-	JPG fileExtension = iota
+	JPG FileExtension = iota
 	PNG
 )
 
+// Opens a draw.Image from the provided string path and color.Model.
 func OpenImage(p string, c color.Model) (draw.Image, error) {
 	file, err := Fopen(p)
 	if err != nil {
@@ -57,7 +60,7 @@ func OpenImage(p string, c color.Model) (draw.Image, error) {
 
 var UnrecognizableExtension = Xrror("%s is not a recognized extension for image encoding.").Out
 
-func splitPath(p string) (string, string, fileExtension) {
+func splitPath(p string) (string, string, FileExtension) {
 	d, f := filepath.Split(p)
 	spl := strings.Split(f, ".")
 	var n, x string
@@ -67,6 +70,7 @@ func splitPath(p string) (string, string, fileExtension) {
 	return d, n, stringToFileExtension(x)
 }
 
+// Saves a image.Image to the provided path.
 func SaveImage(p string, i image.Image) error {
 	_, _, x := splitPath(p)
 	f, err := Fopen(p)
@@ -77,6 +81,7 @@ func SaveImage(p string, i image.Image) error {
 	return EncodeImage(f, i, x)
 }
 
+// Given an io.reader, decodes an image returning it and any error.
 func DecodeImage(r io.Reader) (image.Image, error) {
 	img, _, err := image.Decode(r)
 	if err != nil {
@@ -85,7 +90,9 @@ func DecodeImage(r io.Reader) (image.Image, error) {
 	return img, nil
 }
 
-func EncodeImage(w io.Writer, i image.Image, x fileExtension) error {
+// Given an io.Writer, an image.Image and a FileExtension, attempts to encode the image,
+// returning any error.
+func EncodeImage(w io.Writer, i image.Image, x FileExtension) error {
 	switch x {
 	case JPG:
 		return EncodeJpg(w, i)
@@ -95,6 +102,7 @@ func EncodeImage(w io.Writer, i image.Image, x fileExtension) error {
 	return UnrecognizableExtension(x)
 }
 
+// Encode a jpeg given an io.Writer and image.Image.
 func EncodeJpg(w io.Writer, i image.Image) error {
 	if err := jpeg.Encode(w, i, &jpeg.Options{100}); err != nil {
 		return err
@@ -102,6 +110,7 @@ func EncodeJpg(w io.Writer, i image.Image) error {
 	return nil
 }
 
+// Encode a png given an io.Writer and image.Image.
 func EncodePng(w io.Writer, i image.Image) error {
 	if err := png.Encode(w, i); err != nil {
 		return err
@@ -117,6 +126,7 @@ func exist(path string) {
 	}
 }
 
+//
 func Fopen(path string) (*os.File, error) {
 	p := filepath.Clean(path)
 
@@ -143,64 +153,66 @@ func Fopen(path string) (*os.File, error) {
 }
 
 var (
-	NewGray    = func(r image.Rectangle) draw.Image { return image.NewGray(r) }
-	NewGray16  = func(r image.Rectangle) draw.Image { return image.NewGray16(r) }
-	NewAlpha   = func(r image.Rectangle) draw.Image { return image.NewAlpha(r) }
-	NewAlpha16 = func(r image.Rectangle) draw.Image { return image.NewAlpha16(r) }
-	NewRGBA    = func(r image.Rectangle) draw.Image { return image.NewRGBA(r) }
-	NewRGBA64  = func(r image.Rectangle) draw.Image { return image.NewRGBA64(r) }
-	NewNRGBA   = func(r image.Rectangle) draw.Image { return image.NewNRGBA(r) }
-	NewNRGBA64 = func(r image.Rectangle) draw.Image { return image.NewNRGBA64(r) }
-	NewCMYK    = func(r image.Rectangle) draw.Image { return image.NewCMYK(r) }
+	newGray    = func(r image.Rectangle) draw.Image { return image.NewGray(r) }
+	newGray16  = func(r image.Rectangle) draw.Image { return image.NewGray16(r) }
+	newAlpha   = func(r image.Rectangle) draw.Image { return image.NewAlpha(r) }
+	newAlpha16 = func(r image.Rectangle) draw.Image { return image.NewAlpha16(r) }
+	newRGBA    = func(r image.Rectangle) draw.Image { return image.NewRGBA(r) }
+	newRGBA64  = func(r image.Rectangle) draw.Image { return image.NewRGBA64(r) }
+	newNRGBA   = func(r image.Rectangle) draw.Image { return image.NewNRGBA(r) }
+	newNRGBA64 = func(r image.Rectangle) draw.Image { return image.NewNRGBA64(r) }
+	newCMYK    = func(r image.Rectangle) draw.Image { return image.NewCMYK(r) }
 )
 
+// A new draw.Image from the provided color.Model of the specified X,Y size.
 func NewFrom(m color.Model, X, Y int) draw.Image {
 	r := image.Rect(0, 0, X, Y)
 	switch m {
 	case color.GrayModel:
-		return NewGray(r)
+		return newGray(r)
 	case color.Gray16Model:
-		return NewGray16(r)
+		return newGray16(r)
 	case color.AlphaModel:
-		return NewAlpha(r)
+		return newAlpha(r)
 	case color.Alpha16Model:
-		return NewAlpha16(r)
+		return newAlpha16(r)
 	case color.RGBAModel:
-		return NewRGBA(r)
+		return newRGBA(r)
 	case color.RGBA64Model:
-		return NewRGBA64(r)
+		return newRGBA64(r)
 	case color.NRGBAModel:
-		return NewNRGBA(r)
+		return newNRGBA(r)
 	case color.NRGBA64Model:
-		return NewNRGBA64(r)
+		return newNRGBA64(r)
 	case color.CMYKModel:
-		return NewCMYK(r)
+		return newCMYK(r)
 	}
-	return NewRGBA(r)
+	return newRGBA(r)
 }
 
+// Clone a image.Image with the specified color.Model, return a draw.Image.
 func Clone(i image.Image, m color.Model) draw.Image {
 	switch m {
 	case color.GrayModel:
-		return cloneAs(i, NewGray)
+		return cloneAs(i, newGray)
 	case color.Gray16Model:
-		return cloneAs(i, NewGray16)
+		return cloneAs(i, newGray16)
 	case color.AlphaModel:
-		return cloneAs(i, NewAlpha)
+		return cloneAs(i, newAlpha)
 	case color.Alpha16Model:
-		return cloneAs(i, NewAlpha16)
+		return cloneAs(i, newAlpha16)
 	case color.RGBAModel:
-		return cloneAs(i, NewRGBA)
+		return cloneAs(i, newRGBA)
 	case color.RGBA64Model:
-		return cloneAs(i, NewRGBA64)
+		return cloneAs(i, newRGBA64)
 	case color.NRGBAModel:
-		return cloneAs(i, NewNRGBA)
+		return cloneAs(i, newNRGBA)
 	case color.NRGBA64Model:
-		return cloneAs(i, NewNRGBA64)
+		return cloneAs(i, newNRGBA64)
 	case color.CMYKModel:
-		return cloneAs(i, NewCMYK)
+		return cloneAs(i, newCMYK)
 	}
-	return cloneAs(i, NewRGBA)
+	return cloneAs(i, newRGBA)
 }
 
 func cloneAs(src image.Image, fn func(image.Rectangle) draw.Image) draw.Image {
@@ -210,6 +222,7 @@ func cloneAs(src image.Image, fn func(image.Rectangle) draw.Image) draw.Image {
 	return img
 }
 
+// Returns a color.Model from the priovided string, defaulting to color.RGBAModel.
 func StringToColorModel(s string) color.Model {
 	switch s {
 	case "gray":

@@ -1,6 +1,7 @@
 package star
 
 import (
+	"image/draw"
 	"os"
 	"path/filepath"
 	"plugin"
@@ -8,48 +9,40 @@ import (
 
 type Args struct {
 	Path  string
-	Args  []string
 	Debug bool
+	Args  []string
 }
 
 func NewArgs(path string, debug bool, args ...string) *Args {
 	return &Args{
 		Path:  path,
-		Args:  args,
 		Debug: debug,
+		Args:  args,
 	}
 }
 
-type Star func(string, bool, ...string) error
+type Star func(draw.Image, bool, ...string) (draw.Image, error)
 
 type Loader interface {
-	PluginDirectory() string
+	Directory() string
 	Plugins() ([]string, error)
 	Load() error
 	Get(...string) ([]Star, error)
 }
 
 type loader struct {
-	pluginsDir string
-	plugins    map[string]Star
+	dir    string
+	loaded map[string]Star
 }
 
-var PluginsDirCreateError = Xrror("could not create plugins dir: %v").Out
-
-func defaultDir(tag string) (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", PluginsDirCreateError(err)
-	}
+func defaultDir(tag string) string {
+	wd, _ := os.Getwd()
 	pDir := filepath.Join(wd, tag)
-	_, err = os.Stat(pDir)
+	_, err := os.Stat(pDir)
 	if err != nil {
-		err = os.Mkdir(pDir, 0755)
-		if err != nil {
-			return "", PluginsDirCreateError(err)
-		}
+		os.Mkdir(pDir, 0755)
 	}
-	return pDir, nil
+	return pDir
 }
 
 var FileDoesNotExist = Xrror("file does not exist: %s").Out
@@ -62,27 +55,23 @@ func fileExists(path string) bool {
 	return true
 }
 
-func New(pluginsDir string) (*loader, error) {
+func New(pluginsDir string) *loader {
 	if !fileExists(pluginsDir) {
-		pDir, err := defaultDir("plugins")
-		if err != nil {
-			return nil, err
-		}
-		pluginsDir = pDir
+		pluginsDir = defaultDir("plugins")
 	}
 
 	return &loader{
 		pluginsDir,
 		make(map[string]Star),
-	}, nil
+	}
 }
 
-func (l *loader) PluginDirectory() string {
-	return l.pluginsDir
+func (l *loader) Directory() string {
+	return l.dir
 }
 
 func (l *loader) Plugins() ([]string, error) {
-	dir, err := os.Open(l.pluginsDir)
+	dir, err := os.Open(l.dir)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +99,7 @@ func (l *loader) Load() error {
 	}
 	var srcPath string
 	for _, p := range plugins {
-		srcPath = filepath.Join(l.PluginDirectory(), p)
+		srcPath = filepath.Join(l.dir, p)
 		err = load(l, srcPath)
 		if err != nil {
 			return err
@@ -139,18 +128,18 @@ func load(l *loader, path string) error {
 	}
 
 	var key *string
-	var value func(string, bool, ...string) error
+	var value func(draw.Image, bool, ...string) (draw.Image, error)
 	var ok bool
 
 	if key, ok = u1.(*string); !ok {
 		return OpenPluginError(path, "error with plugin name")
 	}
 
-	if value, ok = u2.(func(string, bool, ...string) error); !ok {
+	if value, ok = u2.(func(draw.Image, bool, ...string) (draw.Image, error)); !ok {
 		return OpenPluginError(path, "error with plugin apply function")
 	}
 
-	l.plugins[*key] = value
+	l.loaded[*key] = value
 
 	return nil
 }
@@ -162,10 +151,16 @@ func (l *loader) Get(tags ...string) ([]Star, error) {
 	for _, t := range tags {
 		var st Star
 		var ok bool
-		if st, ok = l.plugins[t]; !ok {
+		if st, ok = l.loaded[t]; !ok {
 			return nil, StarDoesNotExistError(t)
 		}
 		ret = append(ret, st)
 	}
 	return ret, nil
+}
+
+var Current Loader
+
+func init() {
+	Current = New("")
 }
