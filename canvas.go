@@ -29,14 +29,13 @@ func (o *cOptions) Path() string {
 	return filepath.Join(o.Directory, o.File())
 }
 
-func loadStars(o *Options) ([]star.Star, error) {
+func loadReqs(o *Options) ([]*star.Req, error) {
 	ss := strings.Split(o.Stars, ",")
-	stars, exists := F.Get(ss...)
-	if exists != nil {
-		return nil, exists
+	reqs, err := F.Request(o.Path(), o.Debug, ss...)
+	if err != nil {
+		return nil, err
 	}
-
-	return stars, nil
+	return reqs, nil
 }
 
 var defaultCanvasOptions = cOptions{false, false, false, ".", "TAG", "RGBA", "png", "", "", 100, 100}
@@ -53,15 +52,9 @@ func canvasFlags(o *Options) *flip.FlagSet {
 	fs.StringVar(&o.Color, "color", o.Color, "The color model of the canvas. [GRAY|ALPHA|RGBA|RGBA64|NRGBA|NRGBA64|CMYK]")
 	fs.StringVar(&o.Extension, "extension", o.Extension, "The file extension for the canvas. [png|jpeg]")
 	fs.StringVar(&o.Stars, "stars", o.Stars, "A comma delimited list of stars to apply to the canvas.")
-	fs.StringVar(&o.StarArgs, "starArgs", o.StarArgs, "A comma delimited list of key:value args used by the stars.")
 	fs.IntVar(&o.X, "X", o.X, "X dimension of the canvas.")
 	fs.IntVar(&o.Y, "Y", o.Y, "Y dimension of the canvas.")
 	return fs
-}
-
-func starArgs(o *Options) *star.Args {
-	args := strings.Split(o.StarArgs, ",")
-	return star.NewArgs(o.Path(), o.Debug, args...)
 }
 
 func failure(cause, path string, err error, f *factory.Factory) flip.ExitStatus {
@@ -100,21 +93,20 @@ func canvasCommand(o *Options) flip.ExecutionFunc {
 		}
 		cv := canvas.New(path, im, cm)
 		if o.Stars != "" {
-			args := starArgs(o)
-			stars, err := loadStars(o)
+			reqs, err := loadReqs(o)
 			if err != nil {
-				return failure("load stars", path, err, F)
+				return failure("load stars requests", path, err, F)
 			}
-			err = cv.Apply(args, stars...)
+			err = cv.Apply(reqs...)
 			if err != nil {
-				return failure("apply stars", path, err, F)
+				return failure("apply star requests", path, err, F)
 			}
 		}
 		if err := cv.Save(); err != nil {
 			return failure("save canvas", path, err, F)
 		}
 		if o.View {
-			vc := view(o.LogFormatter, path)
+			vc := view(o.formatter, path)
 			vc.Start()
 		}
 		return success(action, path, F)

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Laughs-In-Flowers/warhola/lib/text"
+	"github.com/Laughs-In-Flowers/warhola/lib/tool"
 	"github.com/fatih/structs"
 )
 
@@ -133,8 +133,8 @@ func (c *Cosmic) strings() []string {
 	return ret
 }
 
-func (c *Cosmic) DebugText() *text.Text {
-	return text.NewText(10, 10, "default", 12, color.White, c.String())
+func (c *Cosmic) DebugText() *tool.Text {
+	return tool.NewText(10, 10, "default", 12, color.White, c.String())
 }
 
 func clone(src draw.Image) draw.Image {
@@ -157,7 +157,7 @@ func (c *Cosmic) Apply(i draw.Image) (draw.Image, error) {
 		}
 	}
 	if c.debug {
-		text.Debug(si, c.DebugText())
+		tool.Debug(si, c.DebugText())
 	}
 	if !c.reuse {
 		c.Reset()

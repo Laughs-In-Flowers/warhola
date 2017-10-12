@@ -2,6 +2,7 @@ package factory
 
 import (
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/Laughs-In-Flowers/log"
@@ -109,9 +110,47 @@ func (c *configuration) Configured() bool {
 }
 
 var builtIns = []Config{
+	config{1, fStars},
 	config{1001, fLogger},
 	config{1002, fCanvaser},
-	config{1003, fStars},
+}
+
+func fStars(f *Factory) error {
+	if f.Loaders == nil {
+		wd, _ := os.Getwd()
+		pDir := filepath.Join(wd, "plugins")
+		l, err := star.New(
+			pDir,
+		)
+		if err != nil {
+			return err
+		}
+		err = l.Load()
+		if err != nil {
+			return err
+		}
+		f.Loaders = l
+	}
+	return nil
+}
+
+func AddStarPaths(dirs ...string) Config {
+	return NewConfig(500,
+		func(f *Factory) error {
+			var err error
+			for _, d := range dirs {
+				err = f.AddStarDir(d)
+				if err != nil {
+					return err
+				}
+			}
+			err = f.Load()
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	)
 }
 
 func fLogger(f *Factory) error {
@@ -123,21 +162,18 @@ func fLogger(f *Factory) error {
 	return nil
 }
 
-func fCanvaser(f *Factory) error {
-	if f.Canvaser == nil {
-		f.Canvaser = canvas.DefaultCanvaser
-	}
-	return nil
+func SetLogger(l log.Logger) Config {
+	return DefaultConfig(
+		func(f *Factory) error {
+			f.Logger = l
+			return nil
+		},
+	)
 }
 
-func fStars(f *Factory) error {
-	if f.Loader == nil {
-		l := star.Current
-		err := l.Load()
-		if err != nil {
-			return err
-		}
-		f.Loader = l
+func fCanvaser(f *Factory) error {
+	if f.Canvaser == nil {
+		f.Canvaser = canvas.Default()
 	}
 	return nil
 }

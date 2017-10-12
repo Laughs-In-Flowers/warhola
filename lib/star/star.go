@@ -5,29 +5,130 @@ import (
 	"os"
 	"path/filepath"
 	"plugin"
+	"strings"
 )
+
+type Req struct {
+	*Args
+	fn Star
+}
+
+func newReq(path string, debug bool, star Star, args ...string) *Req {
+	a := NewArgs(path, debug, args...)
+	return &Req{a, star}
+}
+
+func (r *Req) Apply(i draw.Image) (draw.Image, error) {
+	return r.fn(i, r.Debug, r.Value...)
+}
 
 type Args struct {
 	Path  string
 	Debug bool
-	Args  []string
+	Value []string
 }
 
 func NewArgs(path string, debug bool, args ...string) *Args {
 	return &Args{
 		Path:  path,
 		Debug: debug,
-		Args:  args,
+		Value: args,
 	}
 }
 
 type Star func(draw.Image, bool, ...string) (draw.Image, error)
 
+type Loaders interface {
+	AddStarDir(string) error
+	Load() error
+	Plugins() ([]string, error)
+	Get(string) (Star, error)
+	Request(string, bool, ...string) ([]*Req, error)
+}
+
+type loaders struct {
+	has []Loader
+}
+
+func New(dirs ...string) (*loaders, error) {
+	ret := &loaders{
+		make([]Loader, 0),
+	}
+	for _, d := range dirs {
+		err := ret.AddStarDir(d)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return ret, nil
+}
+
+func (l *loaders) AddStarDir(dir string) error {
+	nl := newLoader(dir)
+	l.has = append(l.has, nl)
+	return nil
+}
+
+func (l *loaders) Load() error {
+	var err error
+	for _, ld := range l.has {
+		err = ld.Load()
+		if err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func (l *loaders) Plugins() ([]string, error) {
+	var ret []string
+	for _, ld := range l.has {
+		ps, err := ld.Plugins()
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, ps...)
+	}
+	return ret, nil
+}
+
+var StarDoesNotExistError = Xrror("star does not exist: %s").Out
+
+func (l *loaders) Get(tag string) (Star, error) {
+	var st Star
+	for _, ld := range l.has {
+		st = ld.Get(tag)
+		if st != nil {
+			return st, nil
+		}
+	}
+	return nil, StarDoesNotExistError(tag)
+}
+
+var ZeroLengthStarRequestError = Xrror("%v is not long enough to request a star").Out
+
+func (l *loaders) Request(path string, debug bool, reqs ...string) ([]*Req, error) {
+	var ret = make([]*Req, 0)
+	for _, req := range reqs {
+		params := strings.Split(req, "+")
+		if len(params) < 1 {
+			return nil, ZeroLengthStarRequestError(params)
+		}
+		st, err := l.Get(params[0])
+		if err != nil {
+			return nil, err
+		}
+		nr := newReq(path, debug, st, params[0:]...)
+		ret = append(ret, nr)
+	}
+	return ret, nil
+}
+
 type Loader interface {
 	Directory() string
 	Plugins() ([]string, error)
 	Load() error
-	Get(...string) ([]Star, error)
+	Get(string) Star
 }
 
 type loader struct {
@@ -35,33 +136,17 @@ type loader struct {
 	loaded map[string]Star
 }
 
-func defaultDir(tag string) string {
-	wd, _ := os.Getwd()
-	pDir := filepath.Join(wd, tag)
-	_, err := os.Stat(pDir)
+func starDir(d string) string {
+	_, err := os.Stat(d)
 	if err != nil {
-		os.Mkdir(pDir, 0755)
+		os.MkdirAll(d, 0755)
 	}
-	return pDir
+	return d
 }
 
-var FileDoesNotExist = Xrror("file does not exist: %s").Out
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return true
-}
-
-func New(pluginsDir string) *loader {
-	if !fileExists(pluginsDir) {
-		pluginsDir = defaultDir("plugins")
-	}
-
+func newLoader(dir string) *loader {
 	return &loader{
-		pluginsDir,
+		starDir(dir),
 		make(map[string]Star),
 	}
 }
@@ -144,23 +229,9 @@ func load(l *loader, path string) error {
 	return nil
 }
 
-var StarDoesNotExistError = Xrror("star does not exist: %s").Out
-
-func (l *loader) Get(tags ...string) ([]Star, error) {
-	var ret []Star
-	for _, t := range tags {
-		var st Star
-		var ok bool
-		if st, ok = l.loaded[t]; !ok {
-			return nil, StarDoesNotExistError(t)
-		}
-		ret = append(ret, st)
+func (l *loader) Get(tag string) Star {
+	if st, ok := l.loaded[tag]; ok {
+		return st
 	}
-	return ret, nil
-}
-
-var Current Loader
-
-func init() {
-	Current = New("")
+	return nil
 }

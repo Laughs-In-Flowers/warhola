@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -11,6 +12,24 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+type xrror struct {
+	base string
+	vals []interface{}
+}
+
+func (x *xrror) Error() string {
+	return fmt.Sprintf("%s", fmt.Sprintf(x.base, x.vals...))
+}
+
+func (x *xrror) Out(vals ...interface{}) *xrror {
+	x.vals = vals
+	return x
+}
+
+func Xrror(base string) *xrror {
+	return &xrror{base: base}
+}
 
 // A package level representation of a file type.
 type FileExtension int
@@ -58,7 +77,7 @@ func OpenImage(p string, c color.Model) (draw.Image, error) {
 	return ri, nil
 }
 
-var UnrecognizableExtension = Xrror("%s is not a recognized extension for image encoding.").Out
+var ExtensionError = Xrror("%s is not a recognized extension for image encoding.").Out
 
 func splitPath(p string) (string, string, FileExtension) {
 	d, f := filepath.Split(p)
@@ -99,7 +118,7 @@ func EncodeImage(w io.Writer, i image.Image, x FileExtension) error {
 	case PNG:
 		return EncodePng(w, i)
 	}
-	return UnrecognizableExtension(x)
+	return ExtensionError(x)
 }
 
 // Encode a jpeg given an io.Writer and image.Image.
@@ -126,7 +145,7 @@ func exist(path string) {
 	}
 }
 
-//
+// Return an *os.File pointer from the given path.
 func Fopen(path string) (*os.File, error) {
 	p := filepath.Clean(path)
 
@@ -190,7 +209,7 @@ func NewFrom(m color.Model, X, Y int) draw.Image {
 	return newRGBA(r)
 }
 
-// Clone a image.Image with the specified color.Model, return a draw.Image.
+// Clone an image.Image with the specified color.Model and return a draw.Image.
 func Clone(i image.Image, m color.Model) draw.Image {
 	switch m {
 	case color.GrayModel:
@@ -222,7 +241,7 @@ func cloneAs(src image.Image, fn func(image.Rectangle) draw.Image) draw.Image {
 	return img
 }
 
-// Returns a color.Model from the priovided string, defaulting to color.RGBAModel.
+// Returns a color.Model from the provided string, defaulting to color.RGBAModel.
 func StringToColorModel(s string) color.Model {
 	switch s {
 	case "gray":

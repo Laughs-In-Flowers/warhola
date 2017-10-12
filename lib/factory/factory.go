@@ -9,12 +9,12 @@ import (
 	"github.com/Laughs-In-Flowers/warhola/lib/star"
 )
 
-// A settings, context, and utility environment for image manipulation.
+// A context and utility environment for image manipulation.
 type Factory struct {
 	Configuration
 	log.Logger
 	canvas.Canvaser
-	star.Loader
+	star.Loaders
 }
 
 // Configures and produces a new *Factory with the provided Configuration.
@@ -28,11 +28,4 @@ func New(cnf ...Config) *Factory {
 		f.Fatal(err)
 	}
 	return f
-}
-
-// A package global, default instance of a Factory.
-var Current *Factory
-
-func init() {
-	Current = New()
 }

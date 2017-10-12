@@ -34,3 +34,4 @@ _back
 *.out
 *.old.*
 coverage.html
+vendor/*

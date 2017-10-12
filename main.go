@@ -33,28 +33,39 @@ type execution func(o *Options)
 
 var executing = []execution{
 	logSetting,
+	factoryCreate,
 }
 
 type tOptions struct {
-	LogFormatter string
+	formatter string
+	log.Logger
 }
 
-var defaultTopOptions tOptions = tOptions{"null"}
+var defaultTopOptions tOptions = tOptions{
+	"null",
+	log.New(os.Stdout, log.LInfo, log.DefaultNullFormatter()),
+}
 
 func tFlags(fs *flip.FlagSet, o *Options) *flip.FlagSet {
-	fs.StringVar(&o.LogFormatter, "formatter", o.LogFormatter, "Specify the log formatter.")
+	fs.StringVar(&o.formatter, "formatter", o.formatter, "Specify the log formatter.")
 	return fs
 }
 
 func logSetting(o *Options) {
-	if o.LogFormatter != "null" {
-		switch o.LogFormatter {
+	if o.formatter != "null" {
+		switch o.formatter {
 		case "raw":
-			F.SwapFormatter(log.GetFormatter("raw"))
+			o.SwapFormatter(log.GetFormatter("raw"))
 		case "text", "stdout":
-			F.SwapFormatter(log.GetFormatter("warhola_text"))
+			o.SwapFormatter(log.GetFormatter("warhola_text"))
 		}
 	}
+}
+
+func factoryCreate(o *Options) {
+	F = factory.New(
+		factory.SetLogger(o.Logger),
+	)
 }
 
 func TopCommand() flip.Command {
@@ -89,7 +100,6 @@ var (
 func init() {
 	O = defaultOptions()
 	log.SetFormatter("warhola_text", log.MakeTextFormatter(versionPackage))
-	F = factory.Current
 	C = flip.BaseWithVersion(versionPackage, versionTag, versionHash, versionDate)
 	C.RegisterGroup("top", -1, TopCommand())
 	C.RegisterGroup("canvas", 10, CanvasCommand())

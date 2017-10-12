@@ -12,7 +12,7 @@ import (
 type Canvas interface {
 	draw.Image
 	Path() string
-	Apply(*star.Args, ...star.Star) error
+	Apply(...*star.Req) error
 	Save() error
 }
 
@@ -60,12 +60,12 @@ func (c *canvas) Path() string {
 }
 
 // Applies the provided star.Stars to the canvas with the provided star.Args.
-func (c *canvas) Apply(args *star.Args, rs ...star.Star) error {
+func (c *canvas) Apply(reqs ...*star.Req) error {
 	var i draw.Image = c.Image
 	var err error
 
-	for _, st := range rs {
-		i, err = st(i, args.Debug, args.Args...)
+	for _, req := range reqs {
+		i, err = req.Apply(i)
 		if err != nil {
 			return err
 		}
@@ -94,7 +94,7 @@ type canvaser struct {
 	afn func([]string, color.Model) ([]Canvas, error)
 }
 
-func defaultCanvaser() Canvaser {
+func Default() Canvaser {
 	return &canvaser{New, Open, OpenAll}
 }
 
@@ -111,11 +111,4 @@ func (c *canvaser) OpenCanvas(p string, m color.Model) (Canvas, error) {
 // Opens any number of canvases from the provided string lsit with the provided color.Model.
 func (c *canvaser) OpenCanvases(p []string, m color.Model) ([]Canvas, error) {
 	return c.afn(p, m)
-}
-
-// A default Canvaser.
-var DefaultCanvaser Canvaser
-
-func init() {
-	DefaultCanvaser = defaultCanvaser()
 }

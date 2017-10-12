@@ -8,7 +8,7 @@ import (
 )
 
 // A struct that embeds a *gg.Context as well as facilities for manipulating
-// images in point by point or drawing capacity.
+// images in a point by point or drawing capacity.
 type Tool struct {
 	i                               draw.Image
 	Height, Width, Radius, PPI, PPC float64
