@@ -12,7 +12,7 @@ import (
 type Canvas interface {
 	draw.Image
 	Path() string
-	Apply(...*star.Req) error
+	Apply(...star.Star) error
 	Save() error
 }
 
@@ -60,7 +60,7 @@ func (c *canvas) Path() string {
 }
 
 // Applies the provided star.Stars to the canvas with the provided star.Args.
-func (c *canvas) Apply(reqs ...*star.Req) error {
+func (c *canvas) Apply(reqs ...star.Star) error {
 	var i draw.Image = c.Image
 	var err error
 

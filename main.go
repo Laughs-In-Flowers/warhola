@@ -13,12 +13,14 @@ import (
 type Options struct {
 	*tOptions
 	*cOptions
+	*sOptions
 }
 
 func defaultOptions() *Options {
 	return &Options{
 		&defaultTopOptions,
 		&defaultCanvasOptions,
+		&defaultStatusOptions,
 	}
 }
 
@@ -102,7 +104,8 @@ func init() {
 	log.SetFormatter("warhola_text", log.MakeTextFormatter(versionPackage))
 	C = flip.BaseWithVersion(versionPackage, versionTag, versionHash, versionDate)
 	C.RegisterGroup("top", -1, TopCommand())
-	C.RegisterGroup("canvas", 10, CanvasCommand())
+	//C.RegisterGroup("canvas", 10, CanvasCommand())
+	C.RegisterGroup("status", 20, StatusCommand())
 }
 
 func main() {

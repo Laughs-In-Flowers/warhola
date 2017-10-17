@@ -14,7 +14,7 @@ type Factory struct {
 	Configuration
 	log.Logger
 	canvas.Canvaser
-	star.Loaders
+	star.Loader
 }
 
 // Configures and produces a new *Factory with the provided Configuration.

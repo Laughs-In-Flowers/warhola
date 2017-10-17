@@ -116,7 +116,7 @@ var builtIns = []Config{
 }
 
 func fStars(f *Factory) error {
-	if f.Loaders == nil {
+	if f.Loader == nil {
 		wd, _ := os.Getwd()
 		pDir := filepath.Join(wd, "plugins")
 		l, err := star.New(
@@ -129,7 +129,7 @@ func fStars(f *Factory) error {
 		if err != nil {
 			return err
 		}
-		f.Loaders = l
+		f.Loader = l
 	}
 	return nil
 }
@@ -139,7 +139,7 @@ func AddStarPaths(dirs ...string) Config {
 		func(f *Factory) error {
 			var err error
 			for _, d := range dirs {
-				err = f.AddStarDir(d)
+				err = f.AddDir(d)
 				if err != nil {
 					return err
 				}

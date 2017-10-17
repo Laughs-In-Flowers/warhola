@@ -2,48 +2,67 @@ package star
 
 import (
 	"image/draw"
+	"log"
 	"os"
 	"path/filepath"
 	"plugin"
 	"strings"
+
+	"github.com/Laughs-In-Flowers/warhola/lib/plugins/builtins"
 )
 
-type Req struct {
-	*Args
-	fn Star
+type Star interface {
+	Tag() string
+	Path() string
+	Debug() bool
+	Args() []string
+	Apply(draw.Image) (draw.Image, error)
 }
 
-func newReq(path string, debug bool, star Star, args ...string) *Req {
-	a := NewArgs(path, debug, args...)
-	return &Req{a, star}
+type StarFunc func(draw.Image, bool, ...string) (draw.Image, error)
+
+type arguments struct {
+	pth string
+	dbg bool
+	arg []string
 }
 
-func (r *Req) Apply(i draw.Image) (draw.Image, error) {
-	return r.fn(i, r.Debug, r.Value...)
+func NewArgs(path string, debug bool, args ...string) *arguments {
+	return &arguments{path, debug, args}
 }
 
-type Args struct {
-	Path  string
-	Debug bool
-	Value []string
+func (a *arguments) Path() string { return a.pth }
+
+func (a *arguments) Debug() bool { return a.dbg }
+
+func (a *arguments) Args() []string { return a.arg }
+
+type star struct {
+	tag string
+	*arguments
+	fn StarFunc
 }
 
-func NewArgs(path string, debug bool, args ...string) *Args {
-	return &Args{
-		Path:  path,
-		Debug: debug,
-		Value: args,
+func NewStar(tag string, s StarFunc, path string, debug bool, args ...string) *star {
+	return &star{
+		tag,
+		NewArgs(path, debug, args...),
+		s,
 	}
 }
 
-type Star func(draw.Image, bool, ...string) (draw.Image, error)
+func (s *star) Tag() string { return s.tag }
 
-type Loaders interface {
-	AddStarDir(string) error
+func (s *star) Apply(i draw.Image) (draw.Image, error) {
+	return s.fn(i, s.Debug(), s.Args()...)
+}
+
+type Loader interface {
+	AddDir(string) error
 	Load() error
-	Plugins() ([]string, error)
-	Get(string) (Star, error)
-	Request(string, bool, ...string) ([]*Req, error)
+	Plugins() (map[string][]string, error)
+	Get(string) (StarFunc, error)
+	GetStars(string, bool, ...string) ([]Star, error)
 }
 
 type loaders struct {
@@ -51,11 +70,11 @@ type loaders struct {
 }
 
 func New(dirs ...string) (*loaders, error) {
-	ret := &loaders{
-		make([]Loader, 0),
-	}
+	def := make([]Loader, 0)
+	def = append(def, BuiltIns)
+	ret := &loaders{def}
 	for _, d := range dirs {
-		err := ret.AddStarDir(d)
+		err := ret.AddDir(d)
 		if err != nil {
 			return nil, err
 		}
@@ -63,7 +82,7 @@ func New(dirs ...string) (*loaders, error) {
 	return ret, nil
 }
 
-func (l *loaders) AddStarDir(dir string) error {
+func (l *loaders) AddDir(dir string) error {
 	nl := newLoader(dir)
 	l.has = append(l.has, nl)
 	return nil
@@ -80,24 +99,26 @@ func (l *loaders) Load() error {
 	return err
 }
 
-func (l *loaders) Plugins() ([]string, error) {
-	var ret []string
-	for _, ld := range l.has {
-		ps, err := ld.Plugins()
+func (l *loaders) Plugins() (map[string][]string, error) {
+	ret := make(map[string][]string)
+	for _, sl := range l.has {
+		ps, err := sl.Plugins()
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, ps...)
+		for k, v := range ps {
+			ret[k] = v
+		}
 	}
 	return ret, nil
 }
 
 var StarDoesNotExistError = Xrror("star does not exist: %s").Out
 
-func (l *loaders) Get(tag string) (Star, error) {
-	var st Star
-	for _, ld := range l.has {
-		st = ld.Get(tag)
+func (l *loaders) Get(tag string) (StarFunc, error) {
+	var st StarFunc
+	for _, sl := range l.has {
+		st, _ = sl.Get(tag)
 		if st != nil {
 			return st, nil
 		}
@@ -107,98 +128,76 @@ func (l *loaders) Get(tag string) (Star, error) {
 
 var ZeroLengthStarRequestError = Xrror("%v is not long enough to request a star").Out
 
-func (l *loaders) Request(path string, debug bool, reqs ...string) ([]*Req, error) {
-	var ret = make([]*Req, 0)
-	for _, req := range reqs {
+func (l *loaders) GetStars(path string, debug bool, requests ...string) ([]Star, error) {
+	var ret = make([]Star, 0)
+	for _, req := range requests {
 		params := strings.Split(req, "+")
 		if len(params) < 1 {
 			return nil, ZeroLengthStarRequestError(params)
 		}
-		st, err := l.Get(params[0])
+		stfn, err := l.Get(params[0])
 		if err != nil {
 			return nil, err
 		}
-		nr := newReq(path, debug, st, params[0:]...)
-		ret = append(ret, nr)
+		ns := NewStar(params[0], stfn, path, debug, params[0:]...)
+		ret = append(ret, ns)
 	}
 	return ret, nil
 }
 
-type Loader interface {
-	Directory() string
-	Plugins() ([]string, error)
-	Load() error
-	Get(string) Star
-}
-
 type loader struct {
 	dir    string
-	loaded map[string]Star
+	llfn   func(*loader) error
+	plfn   func(*loader) (map[string][]string, error)
+	loaded map[string]StarFunc
 }
 
-func starDir(d string) string {
+func loaderDir(d string) string {
 	_, err := os.Stat(d)
 	if err != nil {
-		os.MkdirAll(d, 0755)
+		err := os.MkdirAll(d, 0755)
+		if err != nil {
+			log.Fatalln(err)
+		}
 	}
 	return d
 }
 
 func newLoader(dir string) *loader {
 	return &loader{
-		starDir(dir),
-		make(map[string]Star),
+		loaderDir(dir),
+		defaultLoaderFunc,
+		defaultPluginLister,
+		nil,
 	}
 }
 
-func (l *loader) Directory() string {
-	return l.dir
-}
+func (l *loader) AddDir(string) error { return nil }
 
-func (l *loader) Plugins() ([]string, error) {
-	dir, err := os.Open(l.dir)
-	if err != nil {
-		return nil, err
+func defaultLoaderFunc(l *loader) error {
+	if l.loaded == nil {
+		l.loaded = make(map[string]StarFunc)
 	}
-	defer dir.Close()
-	names, err := dir.Readdirnames(-1)
-	if err != nil {
-		return nil, err
-	}
-
-	var res []string
-	for _, name := range names {
-		if filepath.Ext(name) == ".so" {
-			res = append(res, name)
-		}
-	}
-	return res, nil
-}
-
-func (l *loader) Load() error {
-	var plugins []string
+	var plugins map[string][]string
 	var err error
 	plugins, err = l.Plugins()
 	if err != nil {
 		return err
 	}
-	var srcPath string
-	for _, p := range plugins {
-		srcPath = filepath.Join(l.dir, p)
-		err = load(l, srcPath)
-		if err != nil {
-			return err
+	for _, v := range plugins {
+		var srcPath string
+		for _, plugin := range v {
+			srcPath = filepath.Join(l.dir, plugin)
+			err = loadPath(l, srcPath)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-var (
-	OpenPluginError  = Xrror("Unable to open plugin at %s: %s").Out
-	DoesntExistError = Xrror("Plugin at %s has no %s.").Out
-)
-
-func load(l *loader, path string) error {
+func loadPath(l *loader, path string) error {
 	p, err := plugin.Open(path)
 	if err != nil {
 		return OpenPluginError(path, err)
@@ -229,9 +228,74 @@ func load(l *loader, path string) error {
 	return nil
 }
 
-func (l *loader) Get(tag string) Star {
-	if st, ok := l.loaded[tag]; ok {
-		return st
+func (l *loader) Load() error {
+	return l.llfn(l)
+}
+
+var (
+	OpenPluginError  = Xrror("Unable to open plugin at %s: %s").Out
+	DoesntExistError = Xrror("Plugin at %s has no %s.").Out
+)
+
+func defaultPluginLister(l *loader) (map[string][]string, error) {
+	dir, err := os.Open(l.dir)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	defer dir.Close()
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make(map[string][]string)
+	var res []string
+	for _, name := range names {
+		if filepath.Ext(name) == ".so" {
+			res = append(res, name)
+		}
+	}
+	ret[l.dir] = res
+	return ret, nil
+}
+
+func (l *loader) Plugins() (map[string][]string, error) {
+	return l.plfn(l)
+}
+
+func (l *loader) Get(tag string) (StarFunc, error) {
+	if st, ok := l.loaded[tag]; ok {
+		return st, nil
+	}
+	return nil, StarDoesNotExistError(tag)
+}
+
+var NotImplemented = Xrror("'%s' is not implemented").Out
+
+func (l *loader) GetStars(string, bool, ...string) ([]Star, error) {
+	return nil, NotImplemented("GetStars")
+}
+
+var BuiltIns *loader = &loader{
+	"builtins",
+	func(l *loader) error {
+		if l.loaded == nil {
+			l.loaded = make(map[string]StarFunc)
+			for k, fn := range builtins.BuiltIns {
+				l.loaded[k] = fn
+			}
+		}
+		return nil
+	},
+	func(l *loader) (map[string][]string, error) {
+		l.Load()
+		ret := make(map[string][]string)
+		var res []string
+		for k, _ := range l.loaded {
+			res = append(res, k)
+		}
+		ret["builtins"] = res
+		return ret, nil
+	},
+	nil,
 }

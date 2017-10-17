@@ -1,4 +1,4 @@
-package tool
+package wand
 
 import (
 	"math"
@@ -37,14 +37,14 @@ func NewAnchor(tag string, point *Point) *Anchor {
 }
 
 // Sets an Anchor for use in a Tool instance.
-func (t *Tool) SetAnchor(tag string, point *Point) {
+func (w *Wand) SetAnchor(tag string, point *Point) {
 	a := NewAnchor(tag, point)
-	t.Anchors = append(t.Anchors, a)
+	w.Anchors = append(w.Anchors, a)
 }
 
 // Gets the provided Anchor by tag from the tool instance.
-func (t *Tool) GetAnchor(tag string) *Point {
-	for _, a := range t.Anchors {
+func (w *Wand) GetAnchor(tag string) *Point {
+	for _, a := range w.Anchors {
 		if a.Tag == tag {
 			return a.Point
 		}

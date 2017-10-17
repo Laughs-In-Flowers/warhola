@@ -29,9 +29,9 @@ func (o *cOptions) Path() string {
 	return filepath.Join(o.Directory, o.File())
 }
 
-func loadReqs(o *Options) ([]*star.Req, error) {
+func loadStars(o *Options) ([]star.Star, error) {
 	ss := strings.Split(o.Stars, ",")
-	reqs, err := F.Request(o.Path(), o.Debug, ss...)
+	reqs, err := F.GetStars(o.Path(), o.Debug, ss...)
 	if err != nil {
 		return nil, err
 	}
@@ -93,11 +93,11 @@ func canvasCommand(o *Options) flip.ExecutionFunc {
 		}
 		cv := canvas.New(path, im, cm)
 		if o.Stars != "" {
-			reqs, err := loadReqs(o)
+			stars, err := loadStars(o)
 			if err != nil {
 				return failure("load stars requests", path, err, F)
 			}
-			err = cv.Apply(reqs...)
+			err = cv.Apply(stars...)
 			if err != nil {
 				return failure("apply star requests", path, err, F)
 			}

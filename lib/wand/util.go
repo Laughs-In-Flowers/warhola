@@ -1,12 +1,31 @@
-package tool
+package wand
 
 import (
+	"fmt"
 	"image"
 
 	"golang.org/x/image/draw"
 	"golang.org/x/image/math/f64"
 	"golang.org/x/image/math/fixed"
 )
+
+type xrror struct {
+	base string
+	vals []interface{}
+}
+
+func (x *xrror) Error() string {
+	return fmt.Sprintf("%s", fmt.Sprintf(x.base, x.vals...))
+}
+
+func (x *xrror) Out(vals ...interface{}) *xrror {
+	x.vals = vals
+	return x
+}
+
+func Xrror(base string) *xrror {
+	return &xrror{base: base}
+}
 
 func Flatten(t draw.Interpolator, images ...draw.Image) draw.Image {
 	base := images[0]
