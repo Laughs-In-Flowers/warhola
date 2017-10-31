@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"image/jpeg"
 	"image/png"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"golang.org/x/image/draw"
+	"golang.org/x/image/math/fixed"
 )
 
 type xrror struct {
@@ -31,67 +32,34 @@ func Xrror(base string) *xrror {
 	return &xrror{base: base}
 }
 
-// A package level representation of a file type.
-type FileExtension int
-
-// A method satisfying any String interface for a FileExtension.
-func (f FileExtension) String() string {
-	switch f {
-	case JPG:
-		return "JPG"
-	case PNG:
-		return "PNG"
-	}
-	return ""
-}
-
-func stringToFileExtension(f string) FileExtension {
-	switch strings.ToUpper(f) {
-	case "JPG", "JPEG":
-		return JPG
-	case "PNG":
-		return PNG
-	}
-	return PNG
-}
-
-const (
-	JPG FileExtension = iota
-	PNG
-)
-
 // Opens a draw.Image from the provided string path and color.Model.
-func OpenImage(p string, c color.Model) (draw.Image, error) {
+func OpenImage(p string, c color.Model) (draw.Image, string, error) {
 	file, err := Fopen(p)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer file.Close()
 
-	i, err := DecodeImage(file)
+	i, ext, err := DecodeImage(file)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	ri := Clone(i, c)
-	return ri, nil
+	return ri, ext, nil
 }
 
-var ExtensionError = Xrror("%s is not a recognized extension for image encoding.").Out
-
-func splitPath(p string) (string, string, FileExtension) {
-	d, f := filepath.Split(p)
-	spl := strings.Split(f, ".")
-	var n, x string
-	if len(spl) == 2 {
-		n, x = spl[0], spl[1]
+// Given an io.reader, decodes an image returning it and any error.
+func DecodeImage(r io.Reader) (image.Image, string, error) {
+	img, ext, err := image.Decode(r)
+	if err != nil {
+		return nil, "", err
 	}
-	return d, n, stringToFileExtension(x)
+	return img, ext, nil
 }
 
 // Saves a image.Image to the provided path.
-func SaveImage(p string, i image.Image) error {
-	_, _, x := splitPath(p)
+func SaveImage(p, x string, i image.Image) error {
 	f, err := Fopen(p)
 	if err != nil {
 		return err
@@ -100,22 +68,13 @@ func SaveImage(p string, i image.Image) error {
 	return EncodeImage(f, i, x)
 }
 
-// Given an io.reader, decodes an image returning it and any error.
-func DecodeImage(r io.Reader) (image.Image, error) {
-	img, _, err := image.Decode(r)
-	if err != nil {
-		return nil, err
-	}
-	return img, nil
-}
-
 // Given an io.Writer, an image.Image and a FileExtension, attempts to encode the image,
 // returning any error.
-func EncodeImage(w io.Writer, i image.Image, x FileExtension) error {
+func EncodeImage(w io.Writer, i image.Image, x string) error {
 	switch x {
-	case JPG:
+	case "jpeg", "jpg":
 		return EncodeJpg(w, i)
-	case PNG:
+	case "png":
 		return EncodePng(w, i)
 	}
 	return ExtensionError(x)
@@ -137,7 +96,10 @@ func EncodePng(w io.Writer, i image.Image) error {
 	return nil
 }
 
-var OpenError = Xrror("unable to find or open file %s, provided %s").Out
+var (
+	OpenError      = Xrror("unable to find or open file %s, provided %s").Out
+	ExtensionError = Xrror("%s is not a recognized extension for image encoding.").Out
+)
 
 func exist(path string) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -264,4 +226,12 @@ func StringToColorModel(s string) color.Model {
 		return color.CMYKModel
 	}
 	return color.RGBAModel
+}
+
+func fixp(x, y float64) fixed.Point26_6 {
+	return fixed.Point26_6{fix(x), fix(y)}
+}
+
+func fix(x float64) fixed.Int26_6 {
+	return fixed.Int26_6(x * 64)
 }

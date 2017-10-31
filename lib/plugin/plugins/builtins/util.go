@@ -1,9 +1,12 @@
-package wand
+package builtins
 
 import (
+	"context"
 	"fmt"
 	"image"
 
+	"github.com/Laughs-In-Flowers/log"
+	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
 	"golang.org/x/image/draw"
 	"golang.org/x/image/math/f64"
 	"golang.org/x/image/math/fixed"
@@ -25,6 +28,42 @@ func (x *xrror) Out(vals ...interface{}) *xrror {
 
 func Xrror(base string) *xrror {
 	return &xrror{base: base}
+}
+
+func Debug(c context.Context) bool {
+	dv := c.Value(0)
+	if d, ok := dv.(bool); ok {
+		return d
+	}
+	return false
+}
+
+func DebugMap(c context.Context) map[string]string {
+	di := c.Value(1)
+	if div, ok := di.(map[string]string); ok {
+		return div
+	}
+	return nil
+}
+
+func Log(c context.Context) log.Logger {
+	l := c.Value(2)
+	var ll log.Logger
+	var ok bool
+	if ll, ok = l.(log.Logger); ok {
+		return ll
+	}
+	return nil
+}
+
+func Canvas(c context.Context) canvas.Canvas {
+	cv := c.Value(4)
+	var cvv canvas.Canvas
+	var ok bool
+	if cvv, ok = cv.(canvas.Canvas); ok {
+		return cvv
+	}
+	return nil
 }
 
 func Flatten(t draw.Interpolator, images ...draw.Image) draw.Image {
@@ -57,7 +96,7 @@ func Combine(under draw.Image, over draw.Image, t draw.Interpolator) {
 	)
 }
 
-func Debug(u draw.Image, t *Text) {
+func DebugText(u draw.Image, t *Text) {
 	b := u.Bounds()
 
 	o := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))

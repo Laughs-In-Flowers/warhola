@@ -1,68 +1,22 @@
-package star
+package plugin
 
 import (
-	"image/draw"
 	"log"
 	"os"
 	"path/filepath"
-	"plugin"
-	"strings"
+	p "plugin"
 
-	"github.com/Laughs-In-Flowers/warhola/lib/plugins/builtins"
+	"github.com/Laughs-In-Flowers/flip"
+	"github.com/Laughs-In-Flowers/warhola/lib/plugin/plugins/builtins"
 )
 
-type Star interface {
-	Tag() string
-	Path() string
-	Debug() bool
-	Args() []string
-	Apply(draw.Image) (draw.Image, error)
-}
-
-type StarFunc func(draw.Image, bool, ...string) (draw.Image, error)
-
-type arguments struct {
-	pth string
-	dbg bool
-	arg []string
-}
-
-func NewArgs(path string, debug bool, args ...string) *arguments {
-	return &arguments{path, debug, args}
-}
-
-func (a *arguments) Path() string { return a.pth }
-
-func (a *arguments) Debug() bool { return a.dbg }
-
-func (a *arguments) Args() []string { return a.arg }
-
-type star struct {
-	tag string
-	*arguments
-	fn StarFunc
-}
-
-func NewStar(tag string, s StarFunc, path string, debug bool, args ...string) *star {
-	return &star{
-		tag,
-		NewArgs(path, debug, args...),
-		s,
-	}
-}
-
-func (s *star) Tag() string { return s.tag }
-
-func (s *star) Apply(i draw.Image) (draw.Image, error) {
-	return s.fn(i, s.Debug(), s.Args()...)
-}
+type pluginCmd func() flip.Command
 
 type Loader interface {
 	AddDir(string) error
 	Load() error
 	Plugins() (map[string][]string, error)
-	Get(string) (StarFunc, error)
-	GetStars(string, bool, ...string) ([]Star, error)
+	Get(...string) ([]flip.Command, error)
 }
 
 type loaders struct {
@@ -113,43 +67,24 @@ func (l *loaders) Plugins() (map[string][]string, error) {
 	return ret, nil
 }
 
-var StarDoesNotExistError = Xrror("star does not exist: %s").Out
+var PluginDoesNotExistError = Xrror("plugin does not exist: %s").Out
 
-func (l *loaders) Get(tag string) (StarFunc, error) {
-	var st StarFunc
-	for _, sl := range l.has {
-		st, _ = sl.Get(tag)
-		if st != nil {
-			return st, nil
-		}
+func (l *loaders) Get(tags ...string) ([]flip.Command, error) {
+	var ret = make([]flip.Command, 0)
+	var err error
+	for _, ll := range l.has {
+		var ps []flip.Command
+		ps, err = ll.Get(tags...)
+		ret = append(ret, ps...)
 	}
-	return nil, StarDoesNotExistError(tag)
-}
-
-var ZeroLengthStarRequestError = Xrror("%v is not long enough to request a star").Out
-
-func (l *loaders) GetStars(path string, debug bool, requests ...string) ([]Star, error) {
-	var ret = make([]Star, 0)
-	for _, req := range requests {
-		params := strings.Split(req, "+")
-		if len(params) < 1 {
-			return nil, ZeroLengthStarRequestError(params)
-		}
-		stfn, err := l.Get(params[0])
-		if err != nil {
-			return nil, err
-		}
-		ns := NewStar(params[0], stfn, path, debug, params[0:]...)
-		ret = append(ret, ns)
-	}
-	return ret, nil
+	return ret, err
 }
 
 type loader struct {
 	dir    string
 	llfn   func(*loader) error
 	plfn   func(*loader) (map[string][]string, error)
-	loaded map[string]StarFunc
+	loaded map[string]pluginCmd
 }
 
 func loaderDir(d string) string {
@@ -160,7 +95,11 @@ func loaderDir(d string) string {
 			log.Fatalln(err)
 		}
 	}
-	return d
+	p, err := filepath.Abs(d)
+	if err != nil {
+		return d
+	}
+	return p
 }
 
 func newLoader(dir string) *loader {
@@ -176,7 +115,7 @@ func (l *loader) AddDir(string) error { return nil }
 
 func defaultLoaderFunc(l *loader) error {
 	if l.loaded == nil {
-		l.loaded = make(map[string]StarFunc)
+		l.loaded = make(map[string]pluginCmd)
 	}
 	var plugins map[string][]string
 	var err error
@@ -198,7 +137,7 @@ func defaultLoaderFunc(l *loader) error {
 }
 
 func loadPath(l *loader, path string) error {
-	p, err := plugin.Open(path)
+	p, err := p.Open(path)
 	if err != nil {
 		return OpenPluginError(path, err)
 	}
@@ -206,21 +145,21 @@ func loadPath(l *loader, path string) error {
 	if err != nil {
 		return DoesntExistError(path, "name")
 	}
-	u2, err := p.Lookup("Apply")
+	u2, err := p.Lookup("Command")
 	if err != nil {
-		return DoesntExistError(path, "apply function")
+		return DoesntExistError(path, "command function")
 	}
 
 	var key *string
-	var value func(draw.Image, bool, ...string) (draw.Image, error)
+	var value func() flip.Command
 	var ok bool
 
 	if key, ok = u1.(*string); !ok {
 		return OpenPluginError(path, "error with plugin name")
 	}
 
-	if value, ok = u2.(func(draw.Image, bool, ...string) (draw.Image, error)); !ok {
-		return OpenPluginError(path, "error with plugin apply function")
+	if value, ok = u2.(func() flip.Command); !ok {
+		return OpenPluginError(path, "error with plugin command function")
 	}
 
 	l.loaded[*key] = value
@@ -263,24 +202,37 @@ func (l *loader) Plugins() (map[string][]string, error) {
 	return l.plfn(l)
 }
 
-func (l *loader) Get(tag string) (StarFunc, error) {
-	if st, ok := l.loaded[tag]; ok {
-		return st, nil
+func (l *loader) Get(tags ...string) ([]flip.Command, error) {
+	var ret = make([]flip.Command, 0)
+
+	if len(tags) > 0 {
+		if tags[0] == "ALL" {
+			for _, pc := range l.loaded {
+				ret = append(ret, pc())
+			}
+			return ret, nil
+		}
 	}
-	return nil, StarDoesNotExistError(tag)
-}
 
-var NotImplemented = Xrror("'%s' is not implemented").Out
-
-func (l *loader) GetStars(string, bool, ...string) ([]Star, error) {
-	return nil, NotImplemented("GetStars")
+	for _, tag := range tags {
+		var pc pluginCmd
+		var ok bool
+		pc, ok = l.loaded[tag]
+		switch {
+		case ok:
+			ret = append(ret, pc())
+		case !ok:
+			return nil, PluginDoesNotExistError(tag)
+		}
+	}
+	return ret, nil
 }
 
 var BuiltIns *loader = &loader{
 	"builtins",
 	func(l *loader) error {
 		if l.loaded == nil {
-			l.loaded = make(map[string]StarFunc)
+			l.loaded = make(map[string]pluginCmd)
 			for k, fn := range builtins.BuiltIns {
 				l.loaded[k] = fn
 			}

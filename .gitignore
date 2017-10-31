@@ -28,10 +28,10 @@ Godeps/*
 
 warhola
 warhola/warhola
-stars/*
-plugins/*
+/plugins/*
 _back
 *.out
 *.old.*
 coverage.html
-vendor/*
+/vendor/*
+test-image

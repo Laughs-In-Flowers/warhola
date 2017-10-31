@@ -1,16 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image"
-	"image/color"
 	"image/draw"
 	"math"
 	"math/rand"
-	"strings"
 	"time"
 
-	"github.com/Laughs-In-Flowers/warhola/lib/wand"
+	"github.com/Laughs-In-Flowers/flip"
+	"github.com/Laughs-In-Flowers/log"
+	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
 	"github.com/fatih/structs"
 )
 
@@ -30,11 +31,10 @@ type Cosmic struct {
 	Direction                            V3
 	fromSet                              bool
 	From                                 V3
-	debug                                bool
 	reuse                                bool
 }
 
-func NewCosmic(
+func newCosmic(
 	name string,
 	steps, iterations int,
 	zoom,
@@ -47,9 +47,8 @@ func NewCosmic(
 	dark,
 	fading,
 	step float64,
-	debug,
-	reuse bool) *Cosmic {
-	return &Cosmic{
+	reuse bool) Cosmic {
+	return Cosmic{
 		name,
 		steps,
 		iterations,
@@ -72,19 +71,18 @@ func NewCosmic(
 		V3{},
 		false,
 		V3{},
-		debug,
 		reuse,
 	}
 }
 
-var DefaultCosmic = NewCosmic(
+var DefaultCosmic = newCosmic(
 	"cosmic",
 	20,
 	17,
 	0.8,
 	0.010,
 	0.85,
-	10000000,
+	10000000.0,
 	0.53,
 	0.0015,
 	0.85,
@@ -92,49 +90,10 @@ var DefaultCosmic = NewCosmic(
 	0.730,
 	0.1,
 	false,
-	false,
 )
-
-var DebugCosmic = debugCosmic()
-
-func debugCosmic() *Cosmic {
-	c := *DefaultCosmic
-	nc := &c
-	nc.name = "cosmic:debug"
-	nc.debug = true
-	return nc
-}
 
 func (c *Cosmic) Tag() string {
 	return c.name
-}
-
-func (c *Cosmic) String() string {
-	var list []string
-	list = append(list, fmt.Sprintf("Shader: %s", c.name))
-	list = append(list, "--------------")
-	for _, v := range c.strings() {
-		list = append(list, v)
-	}
-	list = append(list, "--------------\n")
-	return strings.Join(list, "\n")
-}
-
-func (c *Cosmic) destructure() map[string]interface{} {
-	return structs.Map(c)
-}
-
-func (c *Cosmic) strings() []string {
-	var ret []string
-	for k, v := range c.destructure() {
-		val := fmt.Sprintf("%s: %v", k, v)
-		ret = append(ret, val)
-	}
-	return ret
-}
-
-func (c *Cosmic) DebugText() *wand.Text {
-	return wand.NewText(10, 10, "default", 12, color.White, c.String())
 }
 
 func clone(src draw.Image) draw.Image {
@@ -155,9 +114,6 @@ func (c *Cosmic) Apply(i draw.Image) (draw.Image, error) {
 			cl := c.Shade(p, uv, res)
 			si.Set(x, y, cl.RGBA64())
 		}
-	}
-	if c.debug {
-		wand.Debug(si, c.DebugText())
 	}
 	if !c.reuse {
 		c.Reset()
@@ -271,24 +227,137 @@ func (c *Cosmic) Reset() {
 	c.fromSet = false
 }
 
-func selectFn(debug bool) func(draw.Image) (draw.Image, error) {
-	switch {
-	case debug:
-		return DebugCosmic.Apply
-	default:
-		return DefaultCosmic.Apply
+func Canvas(c context.Context) canvas.Canvas {
+	cv := c.Value(4)
+	var cvv canvas.Canvas
+	var ok bool
+	if cvv, ok = cv.(canvas.Canvas); ok {
+		return cvv
 	}
+	return nil
 }
 
-var PluginName = "Cosmic"
-
-func Apply(i draw.Image, debug bool, args ...string) (draw.Image, error) {
-	fn := selectFn(debug)
-	xi, err := fn(i)
-	if err != nil {
-		return i, err
+func Apply(c context.Context, l log.Logger, cc *Cosmic) context.Context {
+	cv := Canvas(c)
+	if cv != nil {
+		if !cv.Noop() {
+			i := cv.GetImage()
+			ni, err := cc.Apply(i)
+			if err != nil {
+				cosmicFatal(l, err)
+			}
+			cv.SetImage(ni)
+			c = context.WithValue(c, 4, cv)
+			return c
+		}
+		cosmicLog(l, "image is noop")
 	}
-	return xi, nil
+	cosmicLog(l, "there is no canvas")
+	return c
+}
+
+func Debug(c context.Context, l log.Logger, cc *Cosmic) context.Context {
+	d := c.Value(0)
+	if dv, ok := d.(bool); ok {
+		if dv {
+			dm := DebugMap(c, cc)
+			if dm != nil {
+				l.Println("cosmic: wrote debug information")
+				c = context.WithValue(c, 1, dm)
+				return c
+			}
+		}
+	}
+	return c
+}
+
+func DebugMap(c context.Context, cc *Cosmic) map[string]string {
+	di := c.Value(1)
+	if dm, ok := di.(map[string]string); ok {
+		return mergeDebugInfo(cc, dm)
+	}
+	return nil
+}
+
+func destructure(c *Cosmic) map[string]interface{} {
+	return structs.Map(c)
+}
+
+func mapped(c *Cosmic) map[string]string {
+	ret := make(map[string]string)
+	for k, v := range destructure(c) {
+		val := fmt.Sprintf("%v", v)
+		ret[k] = val
+	}
+	return ret
+}
+
+func mergeDebugInfo(c *Cosmic, m map[string]string) map[string]string {
+	v := mapped(c)
+	for k, v := range v {
+		m[k] = v
+	}
+	return m
+}
+
+var PluginName = "cosmic"
+
+func cosmicFlags(c *Cosmic, fs *flip.FlagSet) *flip.FlagSet {
+	fs.IntVar(&c.VolumeSteps, "steps", c.VolumeSteps, "")
+	fs.IntVar(&c.Iterations, "iterations", c.VolumeSteps, "")
+	fs.Float64Var(&c.Zoom, "zoom", c.Zoom, "")
+	fs.Float64Var(&c.Speed, "speed", c.Speed, "")
+	fs.Float64Var(&c.Tile, "tile", c.Tile, "")
+	fs.Float64Var(&c.Search, "search", c.Search, "")
+	fs.Float64Var(&c.Magic, "magic", c.Magic, "")
+	fs.Float64Var(&c.Brightness, "brightness", c.Brightness, "")
+	fs.Float64Var(&c.Saturation, "saturation", c.Saturation, "")
+	fs.Float64Var(&c.DarkMatter, "darkMatter", c.DarkMatter, "")
+	fs.Float64Var(&c.DistanceFading, "distanceFading", c.DistanceFading, "")
+	fs.Float64Var(&c.StepSize, "stepSize", c.StepSize, "")
+	return fs
+}
+
+func Log(c context.Context) log.Logger {
+	l := c.Value(2)
+	var ll log.Logger
+	var ok bool
+	if ll, ok = l.(log.Logger); ok {
+		return ll
+	}
+	return nil
+}
+
+func cosmicLog(l log.Logger, msg interface{}) {
+	l.Printf("cosmic: %s", msg)
+}
+
+func cosmicFatal(l log.Logger, msg interface{}) {
+	l.Fatalf("cosmic: %s", msg)
+}
+
+func Command() flip.Command {
+	csmc := &DefaultCosmic
+	fs := flip.NewFlagSet("top", flip.ContinueOnError)
+	fs = cosmicFlags(csmc, fs)
+
+	return flip.NewCommand(
+		"",
+		PluginName,
+		"A starfield filter",
+		100,
+		false,
+		func(c context.Context, a []string) (context.Context, flip.ExitStatus) {
+			l := Log(c)
+			if l != nil {
+				c = Apply(c, l, csmc)
+				c = Debug(c, l, csmc)
+				return c, flip.ExitSuccess
+			}
+			return c, flip.ExitFailure
+		},
+		fs,
+	)
 }
 
 func init() {
