@@ -1,29 +1,29 @@
-package plugin
+package ctx
 
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Laughs-In-Flowers/log"
 	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
 )
 
-type xrror struct {
-	base string
-	vals []interface{}
+type Ctx struct {
+	canvas.Canvas
+	log.Logger
+	Debug    bool
+	DebugMap map[string]string
 }
 
-func (x *xrror) Error() string {
-	return fmt.Sprintf("%s", fmt.Sprintf(x.base, x.vals...))
-}
-
-func (x *xrror) Out(vals ...interface{}) *xrror {
-	x.vals = vals
-	return x
-}
-
-func Xrror(base string) *xrror {
-	return &xrror{base: base}
+func Is(c context.Context) *Ctx {
+	cv := Canvas(c)
+	l := Log(c)
+	d := Debug(c)
+	dm := DebugMap(c)
+	return &Ctx{
+		cv, l, d, dm,
+	}
 }
 
 func Debug(c context.Context) bool {
@@ -42,6 +42,14 @@ func DebugMap(c context.Context) map[string]string {
 	return nil
 }
 
+func DebugMapCollapse(m map[string]string) string {
+	var inter []string
+	for k, v := range m {
+		inter = append(inter, fmt.Sprintf("%s: %s", k, v))
+	}
+	return strings.Join(inter, "\n")
+}
+
 func Log(c context.Context) log.Logger {
 	l := c.Value(2)
 	var ll log.Logger
@@ -51,10 +59,6 @@ func Log(c context.Context) log.Logger {
 	}
 	return nil
 }
-
-//func Plugins(c context.Context) *plugin.Loader {
-//	return nil
-//}
 
 func Canvas(c context.Context) canvas.Canvas {
 	cv := c.Value(4)

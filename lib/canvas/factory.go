@@ -1,34 +1,40 @@
 package canvas
 
 import (
+	"image"
 	"math"
 	"strings"
 
+	"github.com/Laughs-In-Flowers/warhola/lib/util"
 	"golang.org/x/image/math/fixed"
 )
 
 // A suite of tools for examining, manipulating, and measuring a canvas.
 type Factory interface {
+	Height() float64
+	Width() float64
+	Radius() float64
 	Distance(Point, Point) float64
 	DistanceInch(Point, Point) float64
 	DistanceCM(Point, Point) float64
 	DistanceMM(Point, Point) float64
-	Anchor(string, Point)
+	Anchor(string, PointFunc)
 	GetAnchor(string) Point
 }
 
 type factory struct {
-	height, width, radius, ppi, ppc float64
-	anchors                         []*Anchor
+	r        image.Rectangle
+	ppi, ppc float64
+	anchors  []*Anchor
 }
 
-func newFactory(c *canvas, ppIn int, ppu string) *factory {
+func newFactory(r image.Rectangle, ppIn int, ppu string) *factory {
 	f := &factory{}
-	initializeFactory(f, c, ppIn, ppu)
+	initializeFactory(f, r, ppIn, ppu)
 	return f
 }
 
-func initializeFactory(f *factory, c *canvas, ppIn int, ppu string) {
+func initializeFactory(f *factory, r image.Rectangle, ppIn int, ppu string) {
 	pp := float64(ppIn)
 	switch strings.ToLower(ppu) {
 	case "in", "inch":
@@ -38,20 +44,50 @@ func initializeFactory(f *factory, c *canvas, ppIn int, ppu string) {
 		f.ppc = pp
 		f.ppi = pp * 2.54
 	}
-	updateFactory(c, f)
+	updateFactory(f, r)
 }
 
-func updateFactory(c *canvas, f *factory) {
-	i := c.Image
-	b := i.Bounds()
-	f.width, f.height = float64(b.Dx()), float64(b.Dy())
-	f.radius = f.height / 2
+func updateFactory(f *factory, r image.Rectangle) {
+	f.r = r
 	if f.anchors == nil {
 		f.anchors = make([]*Anchor, 0)
+		f.Anchor(
+			"origin",
+			func(Factory) Point { return Point{0, 0} },
+		)
+		f.Anchor(
+			"center",
+			func(f Factory) Point { return Point{f.Width() / 2, f.Height() / 2} },
+		)
+		f.Anchor(
+			"bound",
+			func(f Factory) Point { return Point{f.Width(), f.Height()} },
+		)
 	}
-	f.Anchor("origin", Point{0, 0})
-	f.Anchor("center", Point{f.width / 2, f.height / 2})
-	f.Anchor("bound", Point{f.width, f.height})
+}
+
+func cloneFactory(f *factory, r image.Rectangle) *factory {
+	of := *f
+	nf := &of
+	updateFactory(nf, r)
+	return nf
+}
+
+// Returns the height of the underlying image.Rectangle as a float64.
+func (f *factory) Height() float64 {
+	b := f.r.Bounds()
+	return float64(b.Dy())
+}
+
+// Returns the width of the underlying image.Rectangle as a float64.
+func (f *factory) Width() float64 {
+	b := f.r.Bounds()
+	return float64(b.Dx())
+}
+
+// Returns the radius of the underlying image.Rectangle as a float64.
+func (f *factory) Radius() float64 {
+	return f.Height() / 2
 }
 
 func distance(p1, p2 Point) float64 {
@@ -82,14 +118,19 @@ func (f *factory) DistanceMM(p1, p2 Point) float64 {
 	return d / mm
 }
 
-// A struct encompassing a 2D float64 X - Y coordinate
+// A struct encompassing a 2D float64 X - Y coordinate.
 type Point struct {
 	X, Y float64
 }
 
-// fixed.Point26_6 representation of point
+// A Point from the provided x,y float64 numbers.
+func Pt(x, y float64) Point {
+	return Point{float64(x), float64(y)}
+}
+
+// Returns a fixed.Point26_6 representation of Point.
 func (p Point) Fixed() fixed.Point26_6 {
-	return fixp(p.X, p.Y)
+	return util.Fixp(p.X, p.Y)
 }
 
 // Distance from point to other point.
@@ -97,27 +138,50 @@ func (p Point) Distance(o Point) float64 {
 	return math.Hypot(p.X-o.X, p.Y-o.Y)
 }
 
-// Interpolate other point to provided float64.
+// Interpolate other Point to provided float64.
 func (p Point) Interpolate(o Point, t float64) Point {
 	x := p.X + (o.X-p.X)*t
 	y := p.Y + (o.Y-p.Y)*t
 	return Point{x, y}
 }
 
-// A struct embedding a Point and a string tag as formal name.
+// Returns an image.Point.
+func (p Point) IPoint() image.Point {
+	return image.Point{int(p.X), int(p.Y)}
+}
+
+// Add other Point to this Point.
+func (p Point) Add(o Point) Point {
+	return Point{p.X + o.X, p.Y + o.Y}
+}
+
+// Subtract other Point from this Point
+func (p Point) Sub(o Point) Point {
+	return Point{p.X - o.X, p.Y - o.Y}
+}
+
+// A function that takes a Factory and returns a Point.
+type PointFunc func(f Factory) Point
+
+// A struct encapsulating a specific point derived by relationship function.
 type Anchor struct {
+	fn  PointFunc
 	Tag string
-	*Point
 }
 
-// Produces a new Anchor from the provided tag nad point.
-func NewAnchor(tag string, point Point) *Anchor {
-	return &Anchor{tag, &point}
+// Provided a Factory, return a Point
+func (a *Anchor) Point(f Factory) Point {
+	return a.fn(f)
 }
 
-// Sets an Anchor for use in a Tool instance.
-func (f *factory) Anchor(tag string, point Point) {
-	a := NewAnchor(tag, point)
+// Produces a new Anchor from the provided tag and point function.
+func NewAnchor(tag string, pf PointFunc) *Anchor {
+	return &Anchor{pf, tag}
+}
+
+// Sets an Anchor.
+func (f *factory) Anchor(tag string, pf PointFunc) {
+	a := NewAnchor(tag, pf)
 	f.anchors = append(f.anchors, a)
 }
 
@@ -125,8 +189,13 @@ func (f *factory) Anchor(tag string, point Point) {
 func (f *factory) GetAnchor(tag string) Point {
 	for _, a := range f.anchors {
 		if a.Tag == tag {
-			return *a.Point
+			return a.fn(f)
 		}
 	}
 	return Point{0, 0}
+}
+
+// image.Rect from two Points
+func Rect(p1, p2 Point) image.Rectangle {
+	return image.Rect(int(p1.X), int(p1.Y), int(p2.X), int(p2.Y))
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Laughs-In-Flowers/flip"
 	"github.com/Laughs-In-Flowers/warhola/lib/plugin/plugins/builtins"
+	"github.com/Laughs-In-Flowers/warhola/lib/util/xrr"
 )
 
 type pluginCmd func() flip.Command
@@ -67,7 +68,7 @@ func (l *loaders) Plugins() (map[string][]string, error) {
 	return ret, nil
 }
 
-var PluginDoesNotExistError = Xrror("plugin does not exist: %s").Out
+var PluginDoesNotExistError = xrr.Xrror("plugin does not exist: %s").Out
 
 func (l *loaders) Get(tags ...string) ([]flip.Command, error) {
 	var ret = make([]flip.Command, 0)
@@ -172,8 +173,8 @@ func (l *loader) Load() error {
 }
 
 var (
-	OpenPluginError  = Xrror("Unable to open plugin at %s: %s").Out
-	DoesntExistError = Xrror("Plugin at %s has no %s.").Out
+	OpenPluginError  = xrr.Xrror("Unable to open plugin at %s:\n\t%s").Out
+	DoesntExistError = xrr.Xrror("Plugin at %s has no %s.").Out
 )
 
 func defaultPluginLister(l *loader) (map[string][]string, error) {

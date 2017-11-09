@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"image"
-	"image/draw"
 	"math"
 	"math/rand"
 	"time"
@@ -12,6 +10,7 @@ import (
 	"github.com/Laughs-In-Flowers/flip"
 	"github.com/Laughs-In-Flowers/log"
 	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
+	"github.com/Laughs-In-Flowers/warhola/lib/util/ctx"
 	"github.com/fatih/structs"
 )
 
@@ -96,29 +95,21 @@ func (c *Cosmic) Tag() string {
 	return c.name
 }
 
-func clone(src draw.Image) draw.Image {
-	bounds := src.Bounds()
-	img := image.NewRGBA64(bounds)
-	draw.Draw(img, bounds, src, bounds.Min, draw.Src)
-	return img
-}
-
-func (c *Cosmic) Apply(i draw.Image) (draw.Image, error) {
-	si := clone(i)
-	size := si.Bounds().Size()
+func (c *Cosmic) Apply(i canvas.Canvas) error {
+	size := i.Bounds().Size()
 	res := V2{float64(size.X), float64(size.Y)}
 	for y := 0; y < size.Y; y++ {
 		for x := 0; x < size.X; x++ {
 			p := V2{float64(x), float64(y)}
 			uv := V2{float64(x) / res.X, float64(y) / res.Y}
 			cl := c.Shade(p, uv, res)
-			si.Set(x, y, cl.RGBA64())
+			i.Set(x, y, cl.RGBA64())
 		}
 	}
 	if !c.reuse {
 		c.Reset()
 	}
-	return si, nil
+	return nil
 }
 
 func (c *Cosmic) currentSeedCoords() (float64, float64) {
@@ -227,27 +218,16 @@ func (c *Cosmic) Reset() {
 	c.fromSet = false
 }
 
-func Canvas(c context.Context) canvas.Canvas {
-	cv := c.Value(4)
-	var cvv canvas.Canvas
-	var ok bool
-	if cvv, ok = cv.(canvas.Canvas); ok {
-		return cvv
-	}
-	return nil
-}
-
 func Apply(c context.Context, l log.Logger, cc *Cosmic) context.Context {
-	cv := Canvas(c)
+	cv := ctx.Canvas(c)
 	if cv != nil {
 		if !cv.Noop() {
-			i := cv.GetImage()
-			ni, err := cc.Apply(i)
+			err := cc.Apply(cv)
 			if err != nil {
 				cosmicFatal(l, err)
 			}
-			cv.SetImage(ni)
 			c = context.WithValue(c, 4, cv)
+			cosmicLog(l, "ran")
 			return c
 		}
 		cosmicLog(l, "image is noop")
@@ -318,16 +298,6 @@ func cosmicFlags(c *Cosmic, fs *flip.FlagSet) *flip.FlagSet {
 	return fs
 }
 
-func Log(c context.Context) log.Logger {
-	l := c.Value(2)
-	var ll log.Logger
-	var ok bool
-	if ll, ok = l.(log.Logger); ok {
-		return ll
-	}
-	return nil
-}
-
 func cosmicLog(l log.Logger, msg interface{}) {
 	l.Printf("cosmic: %s", msg)
 }
@@ -348,13 +318,10 @@ func Command() flip.Command {
 		100,
 		false,
 		func(c context.Context, a []string) (context.Context, flip.ExitStatus) {
-			l := Log(c)
-			if l != nil {
-				c = Apply(c, l, csmc)
-				c = Debug(c, l, csmc)
-				return c, flip.ExitSuccess
-			}
-			return c, flip.ExitFailure
+			l := ctx.Log(c)
+			c = Apply(c, l, csmc)
+			c = Debug(c, l, csmc)
+			return c, flip.ExitSuccess
 		},
 		fs,
 	)

@@ -5,7 +5,7 @@ TARGET := $(shell echo $${PWD\#\#*/})
 .DEFAULT_GOAL: $(TARGET)
 
 # These will be provided to the target
-VERSIONTAG := "0.0.1"
+VERSIONTAG := "0.0.3"
 VERSIONHASH := `git rev-parse HEAD`
 VERSIONDATE := `date -u +%d-%m-%Y.%H:%M:%S`
 

@@ -1,55 +1,139 @@
 package canvas
 
 import (
+	"fmt"
 	"image/color"
-	"image/draw"
 	"os"
+	"strings"
 
 	"github.com/Laughs-In-Flowers/log"
+	"github.com/Laughs-In-Flowers/warhola/lib/util"
 )
+
+type Pather interface {
+	Path() string
+	SetPath(string)
+}
+
+type pather struct {
+	path string
+}
+
+const DefaultPath = "DEFAULT"
+
+func (p *pather) Path() string {
+	return p.path
+}
+
+func (p *pather) SetPath(as string) {
+	p.path = as
+}
+
+func (p *pather) clone() *pather {
+	np := *p
+	return &np
+}
+
+type Getter interface {
+	IGet() Image
+}
+
+type Setter interface {
+	ISet(Image)
+}
+
+type GetterSetter interface {
+	Getter
+	Setter
+}
+
+type Copier interface {
+	Copy() Image
+	CopyTo(color.Model) Image
+}
+
+type Paster interface {
+	Paste(Image, Point)
+	Overlay(Image, Point, float64)
+}
+
+type Cloner interface {
+	Clone() Canvas
+}
 
 // An interface for manipulating a single draw.Image.
 type Canvas interface {
-	draw.Image
+	Image
+	Pather
+	GetterSetter
+	Copier
+	Paster
+	Cloner
 	Factory
 	Noop() bool
-	GetImage() draw.Image
-	SetImage(draw.Image)
 	Save() error
 }
 
 type canvas struct {
-	draw.Image
-	path, extension string
-	model           color.Model
-	action          Action
+	Image
+	kind   Kind
+	action Action
+	*pather
 	*factory
 }
 
+type Kind int
+
+const (
+	NoKind Kind = iota
+	PNG
+	JPG
+)
+
+func StringToKind(s string) Kind {
+	switch strings.ToLower(s) {
+	case "png":
+		return PNG
+	case "jpeg", "jpg":
+		return JPG
+	}
+	return NoKind
+}
+
+func (k Kind) String() string {
+	switch k {
+	case PNG:
+		return "png"
+	case JPG:
+		return "jpg"
+	}
+	return "NoKind"
+}
+
 type options struct {
-	ColorM    color.Model
-	Path      string
-	Extension string
-	X, Y      int
-	PP        int
-	PPUnit    string
+	Debug  bool
+	ColorM color.Model
+	Path   string
+	Kind   Kind
+	X, Y   int
+	PP     int
+	PPUnit string
 }
 
 // Provide options by function when creating a canvas
 // (color model, path, extension, x, y, points per, points per unit).
-func Options(colorm string, path, extension string, x, y, pp int, ppu string) options {
+func Options(debug bool, colorm, path, kind string, x, y, pp int, ppu string) options {
 	return options{
-		ColorM:    StringToColorModel(colorm),
-		Path:      path,
-		Extension: extension,
-		X:         x,
-		Y:         y,
-		PP:        pp,
-		PPUnit:    ppu,
+		Debug:  debug,
+		ColorM: util.StringToColorModel(colorm),
+		Path:   path,
+		Kind:   StringToKind(kind),
+		X:      x,
+		Y:      y,
+		PP:     pp,
+		PPUnit: ppu,
 	}
 }
-
-const DefaultPath = "DEFAULT"
 
 type Action int
 
@@ -57,6 +141,7 @@ const (
 	ImageNoop Action = iota
 	ImageNew
 	ImageOpen
+	ImageClone
 )
 
 func newAction(o options) Action {
@@ -74,7 +159,7 @@ func newAction(o options) Action {
 
 // Given options(wrapped via Options function), produces a Canvas interface.
 func New(o options, l log.Logger) Canvas {
-	var i draw.Image
+	var i Image
 	var err error
 	action := newAction(o)
 	switch action {
@@ -83,31 +168,37 @@ func New(o options, l log.Logger) Canvas {
 		l.Println("image is noop")
 	case ImageNew:
 		i = NewFrom(o.ColorM, o.X, o.Y)
-		err = SaveImage(o.Path, o.Extension, i)
+		err = SaveImage(o.Path, o.Kind, i)
 		if err != nil {
 			l.Fatalln(err)
 		}
 		l.Printf("image is new: %s", o.Path)
 	case ImageOpen:
-		i, _, err = OpenImage(o.Path, o.ColorM)
+		var ext string
+		i, ext, err = OpenImage(o.Path, o.ColorM)
+		o.Kind = StringToKind(ext)
 		if err != nil {
 			l.Fatalln(err)
 		}
 		l.Printf("image exists: %s", o.Path)
 	}
 	ni := Clone(i, o.ColorM)
-	c := &canvas{
-		Image:     ni,
-		path:      o.Path,
-		extension: o.Extension,
-		model:     o.ColorM,
-		action:    action,
+	if o.Debug {
+		sp := o.Path
+		o.Path = fmt.Sprintf("%s-debug", sp)
+		l.Printf("debug path is: %s", o.Path)
 	}
-	c.factory = newFactory(c, o.PP, o.PPUnit)
+	c := &canvas{
+		Image:  ni,
+		kind:   o.Kind,
+		action: action,
+		pather: &pather{o.Path},
+	}
+	c.factory = newFactory(c.Bounds(), o.PP, o.PPUnit)
 	return c
 }
 
-// The canvas has no useful image to work with.
+// A boolean indicating this canvas has no useful image to work with.
 func (c *canvas) Noop() bool {
 	if c.action == ImageNoop {
 		return true
@@ -118,22 +209,58 @@ func (c *canvas) Noop() bool {
 // Saves the canvas image to its path.
 func (c *canvas) Save() error {
 	if c.action != ImageNoop {
-		return SaveImage(c.path, c.extension, c.Image)
+		return SaveImage(c.path, c.kind, c.Image)
 	}
 	return nil
 }
 
-// Extract the draw.Image of this canvas
-func (c *canvas) GetImage() draw.Image {
+// Extract the draw.Image of this canvas.
+func (c *canvas) IGet() Image {
 	return c.Image
 }
 
-// Replace the image of this canvas with the supplied image
-// Note: the only anchors that get changed are center, origin, and bound
-// as of now you are responsible for updating your custom anchors if you
-// change your image dimensions
-func (c *canvas) SetImage(i draw.Image) {
+// Replace the image of this canvas with the supplied image.
+func (c *canvas) ISet(i Image) {
 	c.action = ImageOpen
 	c.Image = i
-	updateFactory(c, c.factory)
+	updateFactory(c.factory, c.Bounds())
+}
+
+// Returns a copy of the canvas image.
+func (c *canvas) Copy() Image {
+	return Clone(c.Image, c.ColorModel())
+}
+
+// Returns a copy of the image with the specified color model.
+func (c *canvas) CopyTo(m color.Model) Image {
+	return Clone(c.Image, m)
+}
+
+// Pastes the provided image over the canvas image at the specified point.
+func (c *canvas) Paste(i Image, p Point) {
+	c.ISet(paste(i, c.IGet(), p))
+}
+
+// Pastes the provided image over the canvas image at the specified point with
+// the specified opacity as a float indicating up to 100% opacity
+// (i.e. a float from 1 to 100).
+func (c *canvas) Overlay(i Image, p Point, opacity float64) {
+	c.ISet(overlay(i, c.IGet(), p, opacity))
+}
+
+// Clone canvas to new and separate canvas.
+// Note: will retain canvas path.
+func (c *canvas) Clone() Canvas {
+	nc := *c
+	nc.Image = nil
+	nc.pather = nil
+	nc.factory = nil
+	ni := c.Copy()
+	nf := cloneFactory(c.factory, ni.Bounds())
+	n := &nc
+	n.Image = ni
+	n.pather = c.pather.clone()
+	n.factory = nf
+	n.action = ImageClone
+	return n
 }

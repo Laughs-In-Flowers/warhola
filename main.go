@@ -14,6 +14,8 @@ import (
 	"github.com/Laughs-In-Flowers/log"
 	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
 	"github.com/Laughs-In-Flowers/warhola/lib/plugin"
+	"github.com/Laughs-In-Flowers/warhola/lib/plugin/plugins/builtins"
+	"github.com/Laughs-In-Flowers/warhola/lib/util/ctx"
 )
 
 var pluginDirs = []string{"plugins"}
@@ -138,10 +140,15 @@ func debugCleanup(o *Options, c context.Context) (context.Context, flip.ExitStat
 }
 
 func debugCleanupFunc(c context.Context) {
-	if Debug(c) {
-		if l := Log(c); l != nil {
+	if ctx.Debug(c) {
+		if l := ctx.Log(c); l != nil {
 			l.Println("- start debug information -----")
-			if d := DebugMap(c); d != nil {
+			if d := ctx.DebugMap(c); d != nil {
+				cv := ctx.Canvas(c)
+				mx := cv.Bounds().Max
+				builtins.WriteText(cv, builtins.NewTextOptions(
+					"", ctx.DebugMapCollapse(d), "#FFF", "left", mx.X, mx.Y, 0, 0,
+				))
 				for k, v := range d {
 					l.Printf("%s: %s", k, v)
 				}
@@ -149,32 +156,6 @@ func debugCleanupFunc(c context.Context) {
 			l.Println("- end debug information -----")
 		}
 	}
-}
-
-func Debug(c context.Context) bool {
-	dv := c.Value(0)
-	if d, ok := dv.(bool); ok {
-		return d
-	}
-	return false
-}
-
-func DebugMap(c context.Context) map[string]string {
-	di := c.Value(1)
-	if div, ok := di.(map[string]string); ok {
-		return div
-	}
-	return nil
-}
-
-func Log(c context.Context) log.Logger {
-	l := c.Value(2)
-	var ll log.Logger
-	var ok bool
-	if ll, ok = l.(log.Logger); ok {
-		return ll
-	}
-	return nil
 }
 
 func logSetting(o *Options, c context.Context) (context.Context, flip.ExitStatus) {
@@ -200,12 +181,12 @@ func pluginPush(o *Options, c context.Context) (context.Context, flip.ExitStatus
 }
 
 type cOptions struct {
-	Debug           bool
-	Color           string
-	File, Extension string
-	X, Y            int
-	PP              int
-	PPU             string
+	Debug      bool
+	Color      string
+	File, Kind string
+	X, Y       int
+	PP         int
+	PPU        string
 }
 
 var defaultCanvasOptions = cOptions{
@@ -223,7 +204,7 @@ func cFlags(fs *flip.FlagSet, o *Options) *flip.FlagSet {
 	fs.BoolVar(&o.Debug, "debug", o.Debug, "Run any actions in debug mode where available.")
 	fs.StringVar(&o.Color, "color", o.Color, "The color model of the canvas. [GRAY|ALPHA|RGBA|RGBA64|NRGBA|NRGBA64|CMYK]")
 	fs.StringVar(&o.File, "file", o.File, "The full path of the new or existing image")
-	fs.StringVar(&o.Extension, "extension", o.Extension, "The file extension for the canvas. [png|jpeg]")
+	fs.StringVar(&o.Kind, "kind", o.Kind, "Kind of file for the canvas. [png|jpeg]")
 	fs.IntVar(&o.X, "X", o.X, "X dimension of the canvas.")
 	fs.IntVar(&o.Y, "Y", o.Y, "Y dimension of the canvas.")
 	fs.IntVar(&o.PP, "PP", o.PP, "points per unit where unit is specified in option PP")
@@ -232,9 +213,10 @@ func cFlags(fs *flip.FlagSet, o *Options) *flip.FlagSet {
 }
 
 func canvasSetting(o *Options, c context.Context) (context.Context, flip.ExitStatus) {
-	CV = canvas.New(canvas.Options(o.Color,
+	CV = canvas.New(canvas.Options(o.Debug,
+		o.Color,
 		o.File,
-		o.Extension,
+		o.Kind,
 		o.X,
 		o.Y,
 		o.PP,
@@ -254,7 +236,7 @@ func canvasCleanup(o *Options, c context.Context) (context.Context, flip.ExitSta
 }
 
 func canvasCleanupFunc(c context.Context) {
-	if l := Log(c); l != nil {
+	if l := ctx.Log(c); l != nil {
 		l.Println("cleaning up canvas")
 		err := CV.Save()
 		if err != nil {
@@ -291,13 +273,17 @@ func TopCommand() flip.Command {
 }
 
 type sOptions struct {
-	plugins bool
+	all, plugin, font bool
+	*builtins.TextDirs
 }
 
-var defaultStatusOptions sOptions = sOptions{false}
+var defaultStatusOptions sOptions = sOptions{true, false, false, builtins.NewTextDirs()}
 
 func sFlags(fs *flip.FlagSet, o *sOptions) *flip.FlagSet {
-	fs.BoolVar(&o.plugins, "pluginList", o.plugins, "List of all plugins by directory")
+	fs.BoolVar(&o.all, "all", o.all, "Complete status list")
+	fs.BoolVar(&o.plugin, "plugin", o.plugin, "List of all plugins by directory")
+	fs.BoolVar(&o.font, "font", o.font, "List of all fonts for the specified fontsDir")
+	fs.StringVar(&o.Dirs, "fontsDir", o.Dirs, "The fontsDir to look in.")
 	return fs
 }
 
@@ -315,8 +301,17 @@ func StatusCommand() flip.Command {
 		func(c context.Context, a []string) (context.Context, flip.ExitStatus) {
 			msg := new(bytes.Buffer)
 			switch {
-			case so.plugins:
+			case so.plugin, so.font:
+				so.all = false
+			}
+			switch {
+			case so.plugin:
 				writePlugins(msg)
+			case so.font:
+				writeFonts(msg, so)
+			case so.all:
+				writePlugins(msg)
+				writeFonts(msg, so)
 			}
 			return c, flip.ExitSuccess
 		},
@@ -326,11 +321,12 @@ func StatusCommand() flip.Command {
 
 func writeOnce(msg *bytes.Buffer, w io.Writer) {
 	w.Write(msg.Bytes())
+	msg.Reset()
 }
 
 func failure(msg *bytes.Buffer, cause string, err error) flip.ExitStatus {
-	msg.WriteString(fmt.Sprintf("%s: %s", cause, err))
-	writeOnce(msg, os.Stderr)
+	msg.WriteString(fmt.Sprintf("%s error:\n\t%s\n", cause, err))
+	writeOnce(msg, os.Stdout)
 	return flip.ExitFailure
 }
 
@@ -342,10 +338,21 @@ func writePlugins(msg *bytes.Buffer) {
 	}
 	msg.WriteString(fmt.Sprintf("%s\n", "available plugins"))
 	for k, v := range ps {
-		msg.WriteString(fmt.Sprintf("%s\n", k))
+		msg.WriteString(fmt.Sprintf("\t%s\n", k))
 		for _, vv := range v {
-			msg.WriteString(fmt.Sprintf("   %s\n", vv))
+			msg.WriteString(fmt.Sprintf("\t\t%s\n", vv))
 		}
+	}
+	writeOnce(msg, os.Stdout)
+}
+
+func writeFonts(msg *bytes.Buffer, so *sOptions) {
+	f := builtins.LF
+	f.SetDir(so.Directories()...)
+	fs := f.List()
+	msg.WriteString("available fonts\n")
+	for _, v := range fs {
+		msg.WriteString(fmt.Sprintf("\t%s\n", v))
 	}
 	writeOnce(msg, os.Stdout)
 }

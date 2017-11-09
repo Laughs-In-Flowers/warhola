@@ -12,4 +12,5 @@ var BuiltIns builtinsMap
 
 func init() {
 	BuiltIns = make(builtinsMap)
+	BuiltIns.Register("text", textCommand)
 }
