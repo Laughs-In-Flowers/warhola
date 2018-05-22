@@ -1,11 +1,27 @@
 ## Changelog
 
-### Warhola 0.0.3 (??.??.2017)
+### 0.0.5 (18.05.2018)
 
-- refactor and rewrite
+- rewrite of canvas to eliminate bilevel canvas/image distortion and create 
+  a single structure and interface for package needs (as well as compatibility 
+  with image.Image) 
+
+
+### Warhola 0.0.4 (14.03.2018)
+
+- cleanup & document 
+- plugin abstraction to accomodate built in functionality
+- added transform plugins: crop, resize, rotate, flip, shear, translate
+- added adjustment plugins: brightness, gamma, contrast, hue, saturation 
+- removed plugins to work on canvas issues
+
+
+### Warhola 0.0.3 (25.11.2017)
+
+- refactor & rewrite
 - status command improvements and integration
 - remove central core of Factory to functionality stored in context.Context
-- move factory name and concept to canvas with differing impact
+- move factory name and concept to canvas with slightly different implementation
 - Image interface reduces dependence on draw.Image
 - simple draw, clone, copy and paste functions with association to Canvas
 - util consolidation to remove repeat code
@@ -21,4 +37,4 @@
 
 ### Warhola 0.0.1 (31.10.2017)
 
-- initialize changelog 
+- initialize with changelog & readme 

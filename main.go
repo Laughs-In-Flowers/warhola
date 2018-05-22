@@ -20,7 +20,7 @@ import (
 
 var pluginDirs = []string{"plugins"}
 
-func dirs(paths string) []string {
+func dirs(paths string, b *bytes.Buffer) []string {
 	ret := pluginDirs
 	if paths != "" {
 		var pth string
@@ -29,8 +29,7 @@ func dirs(paths string) []string {
 		for _, v := range spl {
 			pth, err = filepath.Abs(v)
 			if err != nil {
-				msg := new(bytes.Buffer)
-				failure(msg, "plugin dirs", err)
+				failure(b, "plugin dirs", err)
 			}
 			ret = append(ret, pth)
 		}
@@ -52,7 +51,7 @@ func pluginSetting(a []string) {
 
 	msg := new(bytes.Buffer)
 
-	P, err = plugin.New(dirs(d)...)
+	P, err = plugin.New(dirs(d, msg)...)
 	if err != nil {
 		failure(msg, "plugins creation", err)
 	}
@@ -145,10 +144,11 @@ func debugCleanupFunc(c context.Context) {
 			l.Println("- start debug information -----")
 			if d := ctx.DebugMap(c); d != nil {
 				cv := ctx.Canvas(c)
-				mx := cv.Bounds().Max
-				builtins.WriteText(cv, builtins.NewTextOptions(
-					"", ctx.DebugMapCollapse(d), "#FFF", "left", mx.X, mx.Y, 0, 0,
-				))
+				builtins.TextDebugReset(
+					builtins.BuiltInsOptions,
+					ctx.DebugMapCollapse(d),
+				)
+				builtins.WriteText(cv, builtins.BuiltInsOptions)
 				for k, v := range d {
 					l.Printf("%s: %s", k, v)
 				}
@@ -161,10 +161,10 @@ func debugCleanupFunc(c context.Context) {
 func logSetting(o *Options, c context.Context) (context.Context, flip.ExitStatus) {
 	if o.formatter != "null" {
 		switch o.formatter {
-		case "raw":
-			o.SwapFormatter(log.GetFormatter("raw"))
 		case "text", "stdout":
 			o.SwapFormatter(log.GetFormatter("warhola_text"))
+		default:
+			o.SwapFormatter(log.GetFormatter(o.formatter))
 		}
 	}
 	return c, flip.ExitNo
@@ -185,14 +185,14 @@ type cOptions struct {
 	Color      string
 	File, Kind string
 	X, Y       int
-	PP         int
+	PP         float64
 	PPU        string
 }
 
 var defaultCanvasOptions = cOptions{
 	false,
 	"RGBA",
-	canvas.DefaultPath,
+	"",
 	"png",
 	100,
 	100,
@@ -207,21 +207,26 @@ func cFlags(fs *flip.FlagSet, o *Options) *flip.FlagSet {
 	fs.StringVar(&o.Kind, "kind", o.Kind, "Kind of file for the canvas. [png|jpeg]")
 	fs.IntVar(&o.X, "X", o.X, "X dimension of the canvas.")
 	fs.IntVar(&o.Y, "Y", o.Y, "Y dimension of the canvas.")
-	fs.IntVar(&o.PP, "PP", o.PP, "points per unit where unit is specified in option PP")
+	fs.Float64Var(&o.PP, "PP", o.PP, "points per unit where unit is specified in option PP")
 	fs.StringVar(&o.PPU, "PPU", o.PPU, "unit of measurement for points per")
 	return fs
 }
 
 func canvasSetting(o *Options, c context.Context) (context.Context, flip.ExitStatus) {
-	CV = canvas.New(canvas.Options(o.Debug,
-		o.Color,
-		o.File,
-		o.Kind,
-		o.X,
-		o.Y,
-		o.PP,
-		o.PPU,
-	), o)
+	var err error
+	ocm = o.Color
+	CV, err = canvas.New(canvas.SetLogger(o.Logger),
+		canvas.SetDebug(o.Debug),
+		canvas.SetColorModel(canvas.WorkingColorModel),
+		canvas.SetPath(o.File),
+		canvas.SetKind(o.Kind),
+		canvas.SetMeasure(o.PP, o.PPU),
+		canvas.SetRect(o.X, o.Y),
+	)
+	if err != nil {
+		CV.Fatalf("canvas error: %s", err)
+		return nil, flip.ExitFailure
+	}
 	return c, flip.ExitNo
 }
 
@@ -237,10 +242,16 @@ func canvasCleanup(o *Options, c context.Context) (context.Context, flip.ExitSta
 
 func canvasCleanupFunc(c context.Context) {
 	if l := ctx.Log(c); l != nil {
-		l.Println("cleaning up canvas")
-		err := CV.Save()
-		if err != nil {
-			l.Printf("canvas cleanup error: %s", err)
+		l.Println("clean up")
+		var cuErr error
+		switch ocm {
+		case canvas.WorkingColorModel:
+			cuErr = CV.Save()
+		default:
+			cuErr = CV.SaveTo(ocm)
+		}
+		if cuErr != nil {
+			l.Printf("cleanup error: %s", cuErr)
 		}
 	} else {
 		CV.Save()
@@ -274,16 +285,16 @@ func TopCommand() flip.Command {
 
 type sOptions struct {
 	all, plugin, font bool
-	*builtins.TextDirs
+	fontDirs          string
 }
 
-var defaultStatusOptions sOptions = sOptions{true, false, false, builtins.NewTextDirs()}
+var defaultStatusOptions sOptions = sOptions{true, false, false, ""}
 
 func sFlags(fs *flip.FlagSet, o *sOptions) *flip.FlagSet {
 	fs.BoolVar(&o.all, "all", o.all, "Complete status list")
 	fs.BoolVar(&o.plugin, "plugin", o.plugin, "List of all plugins by directory")
 	fs.BoolVar(&o.font, "font", o.font, "List of all fonts for the specified fontsDir")
-	fs.StringVar(&o.Dirs, "fontsDir", o.Dirs, "The fontsDir to look in.")
+	fs.StringVar(&o.fontDirs, "fontDirs", o.fontDirs, "The fontsDir to look in.")
 	return fs
 }
 
@@ -348,7 +359,7 @@ func writePlugins(msg *bytes.Buffer) {
 
 func writeFonts(msg *bytes.Buffer, so *sOptions) {
 	f := builtins.LF
-	f.SetDir(so.Directories()...)
+	f.SetDir(builtins.FontDirectories(so.fontDirs)...)
 	fs := f.List()
 	msg.WriteString("available fonts\n")
 	for _, v := range fs {
@@ -365,10 +376,11 @@ var (
 )
 
 var (
-	O  *Options
-	F  flip.Flip
-	P  plugin.Loader
-	CV canvas.Canvas
+	O   *Options
+	F   flip.Flip
+	P   plugin.Loader
+	ocm string
+	CV  canvas.Canvas
 )
 
 func init() {

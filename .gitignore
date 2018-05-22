@@ -34,4 +34,4 @@ _back
 *.old.*
 coverage.html
 /vendor/*
-test-image
+test-image*

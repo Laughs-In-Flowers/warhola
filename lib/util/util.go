@@ -1,13 +1,13 @@
 package util
 
 import (
-	"image/color"
 	"unicode"
 
 	"github.com/Laughs-In-Flowers/log"
 	"golang.org/x/image/math/fixed"
 )
 
+/*
 // Returns a color.Model from the provided string, defaulting to color.RGBAModel.
 func StringToColorModel(s string) color.Model {
 	switch s {
@@ -32,6 +32,7 @@ func StringToColorModel(s string) color.Model {
 	}
 	return color.RGBAModel
 }
+*/
 
 // Returns fixed.Point26_6
 func Fixp(x, y float64) fixed.Point26_6 {

@@ -13,6 +13,7 @@ import (
 
 type pluginCmd func() flip.Command
 
+// An interface for plugin loading.
 type Loader interface {
 	AddDir(string) error
 	Load() error
@@ -24,6 +25,7 @@ type loaders struct {
 	has []Loader
 }
 
+// Provides a new, multiple directory handling Loader.
 func New(dirs ...string) (*loaders, error) {
 	def := make([]Loader, 0)
 	def = append(def, BuiltIns)
@@ -37,12 +39,14 @@ func New(dirs ...string) (*loaders, error) {
 	return ret, nil
 }
 
+// Adds a new directory to this *loaders instance.
 func (l *loaders) AddDir(dir string) error {
 	nl := newLoader(dir)
 	l.has = append(l.has, nl)
 	return nil
 }
 
+// Loads plugins from all directories, returning any error.
 func (l *loaders) Load() error {
 	var err error
 	for _, ld := range l.has {
@@ -54,6 +58,9 @@ func (l *loaders) Load() error {
 	return err
 }
 
+// Provides a map[string][]string of all plugins managed by this *loaders instance
+// and any error. The returned map is keyed by managed directory, and lists plugins
+// in that directory.
 func (l *loaders) Plugins() (map[string][]string, error) {
 	ret := make(map[string][]string)
 	for _, sl := range l.has {
@@ -68,8 +75,10 @@ func (l *loaders) Plugins() (map[string][]string, error) {
 	return ret, nil
 }
 
+// An error indicating the named plugin does not exist.
 var PluginDoesNotExistError = xrr.Xrror("plugin does not exist: %s").Out
 
+// Provided any number of string tags, returns an array of flip.Command and any error.
 func (l *loaders) Get(tags ...string) ([]flip.Command, error) {
 	var ret = make([]flip.Command, 0)
 	var err error
@@ -112,6 +121,7 @@ func newLoader(dir string) *loader {
 	}
 }
 
+// Does not add a directory, single directory is specified at instantiation.
 func (l *loader) AddDir(string) error { return nil }
 
 func defaultLoaderFunc(l *loader) error {
@@ -168,12 +178,15 @@ func loadPath(l *loader, path string) error {
 	return nil
 }
 
+// Satisfies the interface Loader.Load function for this *loader
 func (l *loader) Load() error {
 	return l.llfn(l)
 }
 
 var (
-	OpenPluginError  = xrr.Xrror("Unable to open plugin at %s:\n\t%s").Out
+	//
+	OpenPluginError = xrr.Xrror("Unable to open plugin at %s:\n\t%s").Out
+	//
 	DoesntExistError = xrr.Xrror("Plugin at %s has no %s.").Out
 )
 
@@ -199,10 +212,12 @@ func defaultPluginLister(l *loader) (map[string][]string, error) {
 	return ret, nil
 }
 
+// Satisfies the interface Loader.Plugins function for this *loader
 func (l *loader) Plugins() (map[string][]string, error) {
 	return l.plfn(l)
 }
 
+// Satisfies the interface Loader.Get function for this *loader
 func (l *loader) Get(tags ...string) ([]flip.Command, error) {
 	var ret = make([]flip.Command, 0)
 
@@ -229,6 +244,7 @@ func (l *loader) Get(tags ...string) ([]flip.Command, error) {
 	return ret, nil
 }
 
+// A customised Loader to handle inbuilt functionality
 var BuiltIns *loader = &loader{
 	"builtins",
 	func(l *loader) error {
