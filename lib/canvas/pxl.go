@@ -4,23 +4,47 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	"image/jpeg"
-	"image/png"
-	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/Laughs-In-Flowers/warhola/lib/util/xrr"
+	"github.com/Laughs-In-Flowers/warhola/lib/util/prl"
+	"github.com/Laughs-In-Flowers/xrr"
 )
 
-// Interface for core image data.
-// Encapsulates image.Image plus other image package image functionality.
+// Interface for core image data. Encapsulates image.Image plus other image
+// package image functionality in addition to direct pixel access, paletting,
+// pasting, and physical measurement.
 type Pxl interface {
 	ImageImage
-	Pix
-	Paletter
 	Measure
+	Paletter
 	Paster
+	Pix
+}
+
+// The interface corresponding to the most relevant functionality of Image
+// in the image package.
+type ImageImage interface {
+	ColorModel() color.Model
+	Bounds() image.Rectangle
+	At(x, y int) color.Color
+	Opaque() bool
+	PixOffset(int, int) int
+	Set(x, y int, c color.Color)
+	SubImage(image.Rectangle) image.Image
+}
+
+// An interface for pasting.
+type Paster interface {
+	Paste(draw.Image, image.Point)
+	Overlay(draw.Image, image.Point, float64)
+}
+
+// An interface for direct pix manipulation.
+type Pix interface {
+	Pix() []uint8
+	SetPix([]uint8)
+	Stride() int
 }
 
 type pxl struct {
@@ -41,6 +65,22 @@ func newPxl() *pxl {
 	return p
 }
 
+func Scratch(cm color.Model, X, Y int) *pxl {
+	return scratch(newPxl(), cm, X, Y)
+}
+
+func scratch(p *pxl, cm color.Model, X, Y int) *pxl {
+	np := &pxl{
+		pix:       make([]uint8, 0),
+		rect:      image.Rect(0, 0, X, Y),
+		paletteFn: p.paletteFn,
+	}
+	icmTocm(cm, np)
+	newTo(np)
+	np.measure = newMeasure(&np.rect, p.measure.pp, p.measure.ppu)
+	return np
+}
+
 func (p *pxl) clone(cm color.Model) *pxl {
 	r := p.Bounds()
 	np := &pxl{
@@ -56,28 +96,119 @@ func (p *pxl) clone(cm color.Model) *pxl {
 	return np
 }
 
-func scratch(o *pxl, cm color.Model, X, Y int) *pxl {
-	p := &pxl{
-		pix:       make([]uint8, 0),
-		rect:      image.Rect(0, 0, X, Y),
-		paletteFn: o.paletteFn,
+type padMode int
+
+const (
+	pmNoFill padMode = iota
+	pmExtend
+	pmWrap
+)
+
+func (p *pxl) pad(m padMode, px, py int) *pxl {
+	dstP := p.clone(color.RGBAModel)
+	switch m {
+	case pmNoFill:
+		return pxlNoFill(dstP, px, py)
+	case pmExtend:
+		return pxlExtend(dstP, px, py)
+	case pmWrap:
+		return pxlWrap(dstP, px, py)
 	}
-	icmTocm(cm, p)
-	newTo(p)
-	p.measure = newMeasure(&p.rect, o.measure.pp, o.measure.ppu)
 	return p
 }
 
-// The interface corresponding to the most relevant functionality of Image
-// in the image package.
-type ImageImage interface {
-	ColorModel() color.Model
-	Bounds() image.Rectangle
-	At(x, y int) color.Color
-	Opaque() bool
-	PixOffset(int, int) int
-	Set(x, y int, c color.Color)
-	SubImage(image.Rectangle) image.Image
+func pxlNoFill(p *pxl, px, py int) *pxl {
+	srcBounds := p.Bounds()
+	paddedW, paddedH := srcBounds.Dx()+2*px, srcBounds.Dy()+2*py
+	newBounds := image.Rect(0, 0, paddedW, paddedH)
+	fillBounds := image.Rect(px, py, px+srcBounds.Dx(), py+srcBounds.Dy())
+	dstP := scratch(p, p.ColorModel(), newBounds.Max.X, newBounds.Max.Y)
+	draw.Draw(dstP, fillBounds, p, srcBounds.Min, draw.Src)
+	return dstP
+}
+
+func pxlExtend(p *pxl, px, py int) *pxl {
+	dstP := pxlNoFill(p, px, py)
+	dstPB := dstP.Bounds()
+	paddedW, paddedH := dstPB.Dx(), dstPB.Dy()
+
+	prl.Run(paddedH, func(start, end int) {
+		for y := start; y < end; y++ {
+			iy := y
+			if iy < py {
+				iy = py
+			} else if iy >= paddedH-py {
+				iy = paddedH - py - 1
+			}
+
+			for x := 0; x < paddedW; x++ {
+				ix := x
+				if ix < px {
+					ix = px
+				} else if x >= paddedW-px {
+					ix = paddedW - px - 1
+				} else if iy == y {
+					// This only enters if we are not in a y-padded area or
+					// x-padded area, so nothing to extend here.
+					// So simply jump to the next padded-x index.
+					x = paddedW - px - 1
+					continue
+				}
+
+				dstPos := y*dstP.str + x*4
+				edgePos := iy*dstP.str + ix*4
+
+				dstP.pix[dstPos+0] = dstP.pix[edgePos+0]
+				dstP.pix[dstPos+1] = dstP.pix[edgePos+1]
+				dstP.pix[dstPos+2] = dstP.pix[edgePos+2]
+				dstP.pix[dstPos+3] = dstP.pix[edgePos+3]
+			}
+		}
+	})
+
+	return dstP
+}
+
+func pxlWrap(p *pxl, px, py int) *pxl {
+	dstP := pxlNoFill(p, px, py)
+	dstPB := dstP.Bounds()
+	paddedW, paddedH := dstPB.Dx(), dstPB.Dy()
+
+	prl.Run(paddedH, func(start, end int) {
+		for y := start; y < end; y++ {
+			iy := y
+			if iy < py {
+				iy = (paddedH - py) - ((py - y) % (paddedH - py*2))
+			} else if iy >= paddedH-py {
+				iy = py - ((py - y) % (paddedH - py*2))
+			}
+
+			for x := 0; x < paddedW; x++ {
+				ix := x
+				if ix < px {
+					ix = (paddedW - px) - ((px - x) % (paddedW - px*2))
+				} else if ix >= paddedW-px {
+					ix = px - ((px - x) % (paddedW - px*2))
+				} else if iy == y {
+					// This only enters if we are not in a y-padded area or
+					// x-padded area, so nothing to extend here.
+					// So simply jump to the next padded-x index.
+					x = paddedW - px - 1
+					continue
+				}
+
+				dstPos := y*dstP.str + x*4
+				edgePos := iy*dstP.str + ix*4
+
+				dstP.pix[dstPos+0] = dstP.pix[edgePos+0]
+				dstP.pix[dstPos+1] = dstP.pix[edgePos+1]
+				dstP.pix[dstPos+2] = dstP.pix[edgePos+2]
+				dstP.pix[dstPos+3] = dstP.pix[edgePos+3]
+			}
+		}
+	})
+
+	return dstP
 }
 
 func (p *pxl) ColorModel() color.Model {
@@ -479,27 +610,28 @@ func newFromOffset(o int, p *pxl) {
 	p.pix = make([]uint8, o*w*h)
 }
 
-func openTo(path string, p *pxl) (Kind, ColorModel, error) {
+func OpenTo(path string) (image.Image, error) {
+	np := newPxl()
+	_, _, err := openTo(path, np)
+	if err != nil {
+		return nil, err
+	}
+	return np, nil
+}
+
+func openTo(path string, p *pxl) (FileType, ColorModel, error) {
 	file, fErr := openFile(path)
 	if fErr != nil {
-		return KINDNOOP, COLORNOOP, fErr
+		return FILETYPENOOP, COLORNOOP, fErr
 	}
 	defer file.Close()
 
-	i, ext, dErr := decodeImage(file)
+	i, ext, dErr := image.Decode(file)
 	if dErr != nil {
-		return KINDNOOP, COLORNOOP, dErr
+		return FILETYPENOOP, COLORNOOP, dErr
 	}
 	cm, eErr := existingTo(i, p)
-	return stringToKind(ext), cm, eErr
-}
-
-func decodeImage(r io.Reader) (image.Image, string, error) {
-	img, ext, err := image.Decode(r)
-	if err != nil {
-		return nil, "", err
-	}
-	return img, ext, nil
+	return stringToFileType(ext), cm, eErr
 }
 
 func existingTo(in image.Image, p *pxl) (ColorModel, error) {
@@ -575,6 +707,8 @@ func existingTo(in image.Image, p *pxl) (ColorModel, error) {
 	return p.m, nil
 }
 
+var toPxlError = xrr.Xrror("to pxl error: %s").Out
+
 func toCorrectedColorModel(in image.Image, p *pxl) image.Image {
 	var out draw.Image
 	xcm := p.m
@@ -598,22 +732,20 @@ func toCorrectedColorModel(in image.Image, p *pxl) image.Image {
 	case RGBA64:
 		out = image.NewRGBA64(in.Bounds())
 	default:
-		out = image.NewNRGBA(in.Bounds())
-		p.m = NRGBA
+		out = WorkingColorModelNew(in.Bounds())
+		p.m = WorkingColorModel
 	}
 	draw.Draw(out, out.Bounds(), in, image.ZP, draw.Src)
 	return out
 }
 
-var toPxlError = xrr.Xrror("to pxl error: %s").Out
-
-func saveImage(path string, k Kind, i image.Image) error {
+func save(path string, t FileType, p *pxl) error {
 	f, err := openFile(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	return encodeImage(f, i, k)
+	return t.encode(f, p)
 }
 
 func openFile(path string) (*os.File, error) {
@@ -651,82 +783,11 @@ func exist(path string) {
 
 var openError = xrr.Xrror("unable to find or open file %s, provided %s").Out
 
-func encodeImage(w io.Writer, i image.Image, k Kind) error {
-	switch k {
-	case JPG:
-		return encodeJpg(w, i)
-	case PNG:
-		return encodePng(w, i)
-	}
-	return kindError(k)
-}
-
-var jpgQuality int = 100
-
-func encodeJpg(w io.Writer, i image.Image) error {
-	if err := jpeg.Encode(w, i, &jpeg.Options{jpgQuality}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func encodePng(w io.Writer, i image.Image) error {
-	if err := png.Encode(w, i); err != nil {
-		return err
-	}
-	return nil
-}
-
-// An interface for direct pix manipulation.
-type Pix interface {
-	//Pix() []uint8
-	//SetPix([]uint8)
-	//CopyPix([]uint8)
-	Pix(int) uint8
-	SetPix(int, uint8)
-	Stride() int
-}
-
-//func (p *pxl) Pix() []uint8 {
-//	return p.pix
-//}
-
-//func (p *pxl) SetPix(x []uint8) {
-//	p.pix = x
-//}
-
-//func (p *pxl) CopyPix(x []uint8) {
-//	copy(p.pix, x)
-//}
-
-func (p *pxl) Pix(pos int) uint8 {
-	if pos > 0 && pos <= len(p.pix) {
-		return p.pix[pos]
-	}
-	return 0
-}
-
-func (p *pxl) SetPix(pos int, val uint8) {
-	if pos > 0 && pos <= len(p.pix) {
-		p.pix[pos] = val
-	}
-}
-
-func (p *pxl) Stride() int {
-	return p.str
-}
-
 func (p *pxl) Palettize(in color.Color) color.Color {
 	if p.paletteFn != nil {
 		return p.paletteFn(in)
 	}
 	return in
-}
-
-// An interface for pasting.
-type Paster interface {
-	Paste(draw.Image, image.Point)
-	Overlay(draw.Image, image.Point, float64)
 }
 
 // paste the provided image to the canvas at the provided point
@@ -738,4 +799,26 @@ func (p *pxl) Paste(src draw.Image, pt image.Point) {
 func (p *pxl) Overlay(src draw.Image, pt image.Point, o float64) {
 	m := image.NewUniform(color.Alpha{uint8(255 * (o / 100))})
 	draw.DrawMask(p, p.rect, src, pt, m, image.ZP, draw.Over)
+}
+
+func (p *pxl) Pix() []uint8 {
+	return p.pix
+}
+
+func (p *pxl) SetPix(x []uint8) {
+	p.pix = x
+}
+
+func (p *pxl) Stride() int {
+	return p.str
+}
+
+type mutationFn func() (*pxl, error)
+
+func mutate(src *pxl, fn mutationFn) (*pxl, error) {
+	ret, err := fn()
+	if err != nil {
+		return src, err
+	}
+	return ret.clone(src.ColorModel()), nil
 }

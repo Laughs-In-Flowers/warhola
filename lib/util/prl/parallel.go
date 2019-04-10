@@ -1,4 +1,4 @@
-package builtins
+package prl
 
 import (
 	"runtime"
@@ -15,7 +15,7 @@ func init() {
 // parallel starts parallel image processing based on the current GOMAXPROCS value.
 // If GOMAXPROCS = 1 it uses no parallelization.
 // If GOMAXPROCS > 1 it spawns N=GOMAXPROCS workers in separate goroutines.
-func parallel(dataSize int, fn func(partStart, partEnd int)) {
+func Run(dataSize int, fn func(partStart, partEnd int)) {
 	numGoroutines := 1
 	partSize := dataSize
 

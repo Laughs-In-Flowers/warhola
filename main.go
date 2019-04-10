@@ -13,9 +13,10 @@ import (
 	"github.com/Laughs-In-Flowers/flip"
 	"github.com/Laughs-In-Flowers/log"
 	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
+	"github.com/Laughs-In-Flowers/warhola/lib/core"
 	"github.com/Laughs-In-Flowers/warhola/lib/plugin"
-	"github.com/Laughs-In-Flowers/warhola/lib/plugin/plugins/builtins"
 	"github.com/Laughs-In-Flowers/warhola/lib/util/ctx"
+	"github.com/Laughs-In-Flowers/warhola/lib/util/geo"
 )
 
 var pluginDirs = []string{"plugins"}
@@ -99,6 +100,8 @@ var executing = []execution{
 	logSetting,
 	logPush,
 	pluginPush,
+	geometrySetting,
+	geometryPush,
 	canvasSetting,
 	canvasPush,
 	canvasCleanup,
@@ -106,16 +109,19 @@ var executing = []execution{
 }
 
 type tOptions struct {
+	Debug     bool
 	formatter string
 	log.Logger
 }
 
 var defaultTopOptions tOptions = tOptions{
+	false,
 	"null",
 	log.New(os.Stdout, log.LInfo, log.DefaultNullFormatter()),
 }
 
 func tFlags(fs *flip.FlagSet, o *Options) *flip.FlagSet {
+	fs.BoolVar(&o.Debug, "debug", o.Debug, "Run any actions in debug mode where available.")
 	fs.StringVar(&o.formatter, "formatter", o.formatter, "Specify the log formatter. [null|raw|stdout]")
 	return fs
 }
@@ -138,17 +144,29 @@ func debugCleanup(o *Options, c context.Context) (context.Context, flip.ExitStat
 	return c, flip.ExitNo
 }
 
+func textReset(o *core.Options, msg string) {
+	o.SetString("text.font", "")
+	o.SetString("text.message", msg)
+	o.SetString("text.color.type", "hex")
+	o.SetString("text.color.value", "FFF")
+	o.SetFloat64("text.font.size", 12)
+	o.SetFloat64("text.line.height", 1)
+	o.SetString("text.align", "left")
+	o.SetFloat64("text.opacity", 100)
+	o.SetBool("text.wrap", true)
+}
+
 func debugCleanupFunc(c context.Context) {
 	if ctx.Debug(c) {
 		if l := ctx.Log(c); l != nil {
 			l.Println("- start debug information -----")
 			if d := ctx.DebugMap(c); d != nil {
 				cv := ctx.Canvas(c)
-				builtins.TextDebugReset(
-					builtins.BuiltInsOptions,
+				textReset(
+					core.CoreOptions,
 					ctx.DebugMapCollapse(d),
 				)
-				builtins.WriteText(cv, builtins.BuiltInsOptions)
+				core.WriteText(cv, core.CoreOptions)
 				for k, v := range d {
 					l.Printf("%s: %s", k, v)
 				}
@@ -181,50 +199,62 @@ func pluginPush(o *Options, c context.Context) (context.Context, flip.ExitStatus
 }
 
 type cOptions struct {
-	Debug      bool
-	Color      string
-	File, Kind string
-	X, Y       int
-	PP         float64
-	PPU        string
+	Color           string
+	InFile, OutFile string
+	FileType        string
+	Geometry        string
+	PP              float64
+	PPU             string
 }
 
 var defaultCanvasOptions = cOptions{
-	false,
-	"RGBA",
-	"",
+	canvas.WorkingColorModelString,
+	"", "",
 	"png",
-	100,
-	100,
+	"",
 	300,
 	"inch",
 }
 
 func cFlags(fs *flip.FlagSet, o *Options) *flip.FlagSet {
-	fs.BoolVar(&o.Debug, "debug", o.Debug, "Run any actions in debug mode where available.")
-	fs.StringVar(&o.Color, "color", o.Color, "The color model of the canvas. [GRAY|ALPHA|RGBA|RGBA64|NRGBA|NRGBA64|CMYK]")
-	fs.StringVar(&o.File, "file", o.File, "The full path of the new or existing image")
-	fs.StringVar(&o.Kind, "kind", o.Kind, "Kind of file for the canvas. [png|jpeg]")
-	fs.IntVar(&o.X, "X", o.X, "X dimension of the canvas.")
-	fs.IntVar(&o.Y, "Y", o.Y, "Y dimension of the canvas.")
+	fs.StringVar(&o.Color, "color", o.Color, "The color model of the canvas. [ALPHA|ALPHA16|CMYK|GRAY|GRAY16|NRGBA|NRGBA64|RGBA|RGBA64]")
+	fs.StringVar(&o.InFile, "in", o.InFile, "The full path of the new or existing image")
+	fs.StringVar(&o.OutFile, "out", o.OutFile, "The path for the out file if different from the in file")
+	fs.StringVar(&o.FileType, "fileType", o.FileType, "Type of file for the canvas. [bmp|jpeg|png|tiff]")
+	geo.GeometryFlag(fs, &o.Geometry, o.Geometry)
 	fs.Float64Var(&o.PP, "PP", o.PP, "points per unit where unit is specified in option PP")
 	fs.StringVar(&o.PPU, "PPU", o.PPU, "unit of measurement for points per")
 	return fs
 }
 
+func geometrySetting(o *Options, c context.Context) (context.Context, flip.ExitStatus) {
+	var gErr error
+	G = geo.New(o.Geometry)
+	if gErr != nil {
+		o.Fatalf("geometry error: %s", gErr)
+		return nil, flip.ExitFailure
+	}
+	core.CoreOptions.SetString("default.geometry", o.Geometry)
+	return c, flip.ExitNo
+}
+
+func geometryPush(o *Options, c context.Context) (context.Context, flip.ExitStatus) {
+	c = context.WithValue(c, 5, G)
+	return c, flip.ExitNo
+}
+
 func canvasSetting(o *Options, c context.Context) (context.Context, flip.ExitStatus) {
-	var err error
+	var cErr error
 	ocm = o.Color
-	CV, err = canvas.New(canvas.SetLogger(o.Logger),
-		canvas.SetDebug(o.Debug),
-		canvas.SetColorModel(canvas.WorkingColorModel),
-		canvas.SetPath(o.File),
-		canvas.SetKind(o.Kind),
+	CV, cErr = canvas.New(canvas.SetLogger(o.Logger),
+		canvas.SetColorModel(canvas.WorkingColorModelString),
+		canvas.SetPath(o.InFile, o.OutFile),
+		canvas.SetFileType(o.FileType),
 		canvas.SetMeasure(o.PP, o.PPU),
-		canvas.SetRect(o.X, o.Y),
+		canvas.SetRect(G.X, G.Y),
 	)
-	if err != nil {
-		CV.Fatalf("canvas error: %s", err)
+	if cErr != nil {
+		CV.Printf("canvas error: %s", cErr)
 		return nil, flip.ExitFailure
 	}
 	return c, flip.ExitNo
@@ -245,7 +275,7 @@ func canvasCleanupFunc(c context.Context) {
 		l.Println("clean up")
 		var cuErr error
 		switch ocm {
-		case canvas.WorkingColorModel:
+		case canvas.WorkingColorModelString:
 			cuErr = CV.Save()
 		default:
 			cuErr = CV.SaveTo(ocm)
@@ -330,14 +360,14 @@ func StatusCommand() flip.Command {
 	)
 }
 
-func writeOnce(msg *bytes.Buffer, w io.Writer) {
+func writeOnce(w io.Writer, msg *bytes.Buffer) {
 	w.Write(msg.Bytes())
 	msg.Reset()
 }
 
 func failure(msg *bytes.Buffer, cause string, err error) flip.ExitStatus {
 	msg.WriteString(fmt.Sprintf("%s error:\n\t%s\n", cause, err))
-	writeOnce(msg, os.Stdout)
+	writeOnce(os.Stdout, msg)
 	return flip.ExitFailure
 }
 
@@ -345,27 +375,29 @@ func writePlugins(msg *bytes.Buffer) {
 	ps, err := P.Plugins()
 	if err != nil {
 		msg.WriteString(fmt.Sprintf("unable to write plugins: %s", err.Error()))
-		writeOnce(msg, os.Stderr)
+		writeOnce(os.Stderr, msg)
 	}
 	msg.WriteString(fmt.Sprintf("%s\n", "available plugins"))
 	for k, v := range ps {
-		msg.WriteString(fmt.Sprintf("\t%s\n", k))
-		for _, vv := range v {
-			msg.WriteString(fmt.Sprintf("\t\t%s\n", vv))
+		if len(v) > 0 {
+			msg.WriteString(fmt.Sprintf("\t%s\n", k))
+			for _, vv := range v {
+				msg.WriteString(fmt.Sprintf("\t\t%s\n", vv))
+			}
 		}
 	}
-	writeOnce(msg, os.Stdout)
+	writeOnce(os.Stdout, msg)
 }
 
 func writeFonts(msg *bytes.Buffer, so *sOptions) {
-	f := builtins.LF
-	f.SetDir(builtins.FontDirectories(so.fontDirs)...)
+	f := core.LF
+	f.SetDir(core.FontDirs(so.fontDirs)...)
 	fs := f.List()
 	msg.WriteString("available fonts\n")
 	for _, v := range fs {
 		msg.WriteString(fmt.Sprintf("\t%s\n", v))
 	}
-	writeOnce(msg, os.Stdout)
+	writeOnce(os.Stdout, msg)
 }
 
 var (
@@ -377,27 +409,29 @@ var (
 
 var (
 	O   *Options
-	F   flip.Flip
+	F   flip.Flpr
 	P   plugin.Loader
 	ocm string
 	CV  canvas.Canvas
+	G   *geo.Geometry
 )
 
 func init() {
 	O = defaultOptions()
 	log.SetFormatter("warhola_text", log.MakeTextFormatter(versionPackage))
-	F = flip.Base
-	F.AddCommand("version", versionPackage, versionTag, versionHash, versionDate).
-		AddCommand("help").
+	F = flip.New("warhola")
+	F.AddBuiltIn("version", versionPackage, versionTag, versionHash, versionDate).
+		AddBuiltIn("help").
 		SetGroup("top", -1, TopCommand(), StatusCommand())
 }
 
-// context passes the following
-// 0 debug boolean
-// 1 debug info
-// 2 log.Logger
-// 3 plugin loaders
-// 4 canvas
+// context contains the following key/values
+// 0 - debug boolean
+// 1 - debug info
+// 2 - log.Logger
+// 3 - plugin loaders
+// 4 - canvas
+// 5 - geometry
 func main() {
 	pluginSetting(os.Args)
 	c := context.Background()

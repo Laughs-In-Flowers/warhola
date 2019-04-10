@@ -3,7 +3,7 @@ PACKAGE := "github.com/Laughs-In-Flowers/warhola"
 TARGET := $(shell echo $${PWD\#\#*/})
 .DEFAULT_GOAL: $(TARGET)
 # These will be provided to the target
-VERSIONTAG := "0.0.4"
+VERSIONTAG := "0.0.6"
 VERSIONHASH := `git rev-parse HEAD`
 VERSIONDATE := `date -u +%d-%m-%Y.%H:%M:%S`
 

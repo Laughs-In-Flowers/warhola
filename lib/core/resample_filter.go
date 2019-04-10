@@ -1,16 +1,12 @@
-package canvas
+package core
 
 import (
-	"image/color"
 	"math"
+
+	"github.com/Laughs-In-Flowers/warhola/lib/canvas"
 )
 
-type ResampleFilterFunc func(float64) float64
-
-type ResampleFilter struct {
-	Support float64
-	Fn      ResampleFilterFunc
-}
+type ResampleFilter = canvas.ResampleFilter
 
 func stringToFilter(s string) ResampleFilter {
 	switch s {
@@ -47,40 +43,12 @@ func stringToFilter(s string) ResampleFilter {
 }
 
 var (
-	nearest = func(src *canvas, w, h int) {
-		srcP := src.pxl.clone(color.RGBAModel)
-		srcW, srcH := srcP.Bounds().Dx(), srcP.Bounds().Dy()
-		srcStride := srcP.str
-
-		dstP := scratch(srcP, srcP.ColorModel(), w, h)
-		dstStride := dstP.str
-
-		dx := float64(srcW) / float64(w)
-		dy := float64(srcH) / float64(h)
-
-		for y := 0; y < h; y++ {
-			for x := 0; x < w; x++ {
-				pos := y*dstStride + x*4
-				ipos := int((float64(y)+0.5)*dy)*srcStride + int((float64(x)+0.5)*dx)*4
-
-				dstP.pix[pos+0] = srcP.pix[ipos+0]
-				dstP.pix[pos+1] = srcP.pix[ipos+1]
-				dstP.pix[pos+2] = srcP.pix[ipos+2]
-				dstP.pix[pos+3] = srcP.pix[ipos+3]
-			}
-		}
-
-		src.pxl = dstP.clone(src.ColorModel())
-	}
-
-	NearestNeighbor = ResampleFilter{
-		Support: 0,
-		Fn:      nil,
-	}
+	NearestNeighbor = canvas.NearestNeighbor
 
 	Box = ResampleFilter{
-		Support: 0.5,
-		Fn: func(x float64) float64 {
+		"box",
+		0.5,
+		func(x float64) float64 {
 			if math.Abs(x) < 0.5 {
 				return 1
 			}
@@ -88,20 +56,12 @@ var (
 		},
 	}
 
-	Linear = ResampleFilter{
-		Support: 1.0,
-		Fn: func(x float64) float64 {
-			x = math.Abs(x)
-			if x < 1.0 {
-				return 1.0 - x
-			}
-			return 0
-		},
-	}
+	Linear = canvas.Linear
 
 	Gaussian = ResampleFilter{
-		Support: 1.0,
-		Fn: func(x float64) float64 {
+		"gaussian",
+		1.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x < 1.0 {
 				exp := 2.0
@@ -115,8 +75,9 @@ var (
 	}
 
 	MitchellNetravali = ResampleFilter{
-		Support: 2.0,
-		Fn: func(x float64) float64 {
+		"mitchelnetravali",
+		2.0,
+		func(x float64) float64 {
 			b := 1.0 / 3
 			c := 1.0 / 3
 			var w [4]float64
@@ -141,8 +102,9 @@ var (
 	}
 
 	CatmullRom = ResampleFilter{
-		Support: 2.0,
-		Fn: func(x float64) float64 {
+		"catmullrom",
+		2.0,
+		func(x float64) float64 {
 			b := 0.0
 			c := 0.5
 			var w [4]float64
@@ -167,8 +129,9 @@ var (
 	}
 
 	Lanczos = ResampleFilter{
-		Support: 3.0,
-		Fn: func(x float64) float64 {
+		"lanczos",
+		3.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x == 0 {
 				return 1.0
@@ -180,8 +143,9 @@ var (
 	}
 
 	Bartlett = ResampleFilter{
-		Support: 3.0,
-		Fn: func(x float64) float64 {
+		"bartlett",
+		3.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x < 3.0 {
 				return sinc(x) * (3.0 - x) / 3.0
@@ -191,8 +155,9 @@ var (
 	}
 
 	Hermite = ResampleFilter{
-		Support: 1.0,
-		Fn: func(x float64) float64 {
+		"hermite",
+		1.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x < 1.0 {
 				return bcspline(x, 0.0, 0.0)
@@ -202,8 +167,9 @@ var (
 	}
 
 	BSpline = ResampleFilter{
-		Support: 2.0,
-		Fn: func(x float64) float64 {
+		"bspline",
+		2.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x < 2.0 {
 				return bcspline(x, 1.0, 0.0)
@@ -213,8 +179,9 @@ var (
 	}
 
 	Hann = ResampleFilter{
-		Support: 3.0,
-		Fn: func(x float64) float64 {
+		"hann",
+		3.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x < 3.0 {
 				return sinc(x) * (0.5 + 0.5*math.Cos(math.Pi*x/3.0))
@@ -224,8 +191,9 @@ var (
 	}
 
 	Hamming = ResampleFilter{
-		Support: 3.0,
-		Fn: func(x float64) float64 {
+		"hamming",
+		3.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x < 3.0 {
 				return sinc(x) * (0.54 + 0.46*math.Cos(math.Pi*x/3.0))
@@ -235,8 +203,9 @@ var (
 	}
 
 	Blackman = ResampleFilter{
-		Support: 3.0,
-		Fn: func(x float64) float64 {
+		"blackman",
+		3.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x < 3.0 {
 				return sinc(x) * (0.42 - 0.5*math.Cos(math.Pi*x/3.0+math.Pi) + 0.08*math.Cos(2.0*math.Pi*x/3.0))
@@ -246,8 +215,9 @@ var (
 	}
 
 	Welch = ResampleFilter{
-		Support: 3.0,
-		Fn: func(x float64) float64 {
+		"welch",
+		3.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x < 3.0 {
 				return sinc(x) * (1.0 - (x * x / 9.0))
@@ -257,14 +227,33 @@ var (
 	}
 
 	Cosine = ResampleFilter{
-		Support: 3.0,
-		Fn: func(x float64) float64 {
+		"cosine",
+		3.0,
+		func(x float64) float64 {
 			x = math.Abs(x)
 			if x < 3.0 {
 				return sinc(x) * math.Cos((math.Pi/2.0)*(x/3.0))
 			}
 			return 0
 		},
+	}
+
+	ResampleFilters = []ResampleFilter{
+		NearestNeighbor,
+		Box,
+		Linear,
+		Gaussian,
+		MitchellNetravali,
+		CatmullRom,
+		Lanczos,
+		Bartlett,
+		Hermite,
+		BSpline,
+		Hann,
+		Hamming,
+		Blackman,
+		Welch,
+		Cosine,
 	}
 )
 

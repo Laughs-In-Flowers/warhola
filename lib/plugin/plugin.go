@@ -1,14 +1,13 @@
 package plugin
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	p "plugin"
 
 	"github.com/Laughs-In-Flowers/flip"
-	"github.com/Laughs-In-Flowers/warhola/lib/plugin/plugins/builtins"
-	"github.com/Laughs-In-Flowers/warhola/lib/util/xrr"
+	"github.com/Laughs-In-Flowers/warhola/lib/core"
+	"github.com/Laughs-In-Flowers/xrr"
 )
 
 type pluginCmd func() flip.Command
@@ -28,7 +27,7 @@ type loaders struct {
 // Provides a new, multiple directory handling Loader.
 func New(dirs ...string) (*loaders, error) {
 	def := make([]Loader, 0)
-	def = append(def, BuiltIns)
+	def = append(def, Core)
 	ret := &loaders{def}
 	for _, d := range dirs {
 		err := ret.AddDir(d)
@@ -41,7 +40,10 @@ func New(dirs ...string) (*loaders, error) {
 
 // Adds a new directory to this *loaders instance.
 func (l *loaders) AddDir(dir string) error {
-	nl := newLoader(dir)
+	nl, err := newLoader(dir)
+	if err != nil {
+		return err
+	}
 	l.has = append(l.has, nl)
 	return nil
 }
@@ -64,10 +66,7 @@ func (l *loaders) Load() error {
 func (l *loaders) Plugins() (map[string][]string, error) {
 	ret := make(map[string][]string)
 	for _, sl := range l.has {
-		ps, err := sl.Plugins()
-		if err != nil {
-			return nil, err
-		}
+		ps, _ := sl.Plugins()
 		for k, v := range ps {
 			ret[k] = v
 		}
@@ -98,27 +97,17 @@ type loader struct {
 }
 
 func loaderDir(d string) string {
-	_, err := os.Stat(d)
-	if err != nil {
-		err := os.MkdirAll(d, 0755)
-		if err != nil {
-			log.Fatalln(err)
-		}
-	}
-	p, err := filepath.Abs(d)
-	if err != nil {
-		return d
-	}
-	return p
+	pth, _ := filepath.Abs(d)
+	return pth
 }
 
-func newLoader(dir string) *loader {
+func newLoader(dir string) (*loader, error) {
 	return &loader{
 		loaderDir(dir),
 		defaultLoaderFunc,
 		defaultPluginLister,
 		nil,
-	}
+	}, nil
 }
 
 // Does not add a directory, single directory is specified at instantiation.
@@ -132,7 +121,7 @@ func defaultLoaderFunc(l *loader) error {
 	var err error
 	plugins, err = l.Plugins()
 	if err != nil {
-		return err
+		return nil // pass through here and do nothing, its less mess
 	}
 	for _, v := range plugins {
 		var srcPath string
@@ -196,6 +185,7 @@ func defaultPluginLister(l *loader) (map[string][]string, error) {
 		return nil, err
 	}
 	defer dir.Close()
+
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
 		return nil, err
@@ -209,6 +199,7 @@ func defaultPluginLister(l *loader) (map[string][]string, error) {
 		}
 	}
 	ret[l.dir] = res
+
 	return ret, nil
 }
 
@@ -221,36 +212,35 @@ func (l *loader) Plugins() (map[string][]string, error) {
 func (l *loader) Get(tags ...string) ([]flip.Command, error) {
 	var ret = make([]flip.Command, 0)
 
-	if len(tags) > 0 {
-		if tags[0] == "ALL" {
-			for _, pc := range l.loaded {
-				ret = append(ret, pc())
-			}
-			return ret, nil
-		}
-	}
-
-	for _, tag := range tags {
-		var pc pluginCmd
-		var ok bool
-		pc, ok = l.loaded[tag]
-		switch {
-		case ok:
+	switch {
+	case len(tags) > 0 && tags[0] == "ALL":
+		for _, pc := range l.loaded {
 			ret = append(ret, pc())
-		case !ok:
-			return nil, PluginDoesNotExistError(tag)
+		}
+		return ret, nil
+	default:
+		for _, tag := range tags {
+			var pc pluginCmd
+			var ok bool
+			pc, ok = l.loaded[tag]
+			switch {
+			case ok:
+				ret = append(ret, pc())
+			case !ok:
+				return nil, PluginDoesNotExistError(tag)
+			}
 		}
 	}
 	return ret, nil
 }
 
-// A customised Loader to handle inbuilt functionality
-var BuiltIns *loader = &loader{
-	"builtins",
+// A customised always loaded Loader encapsulating core functionality
+var Core *loader = &loader{
+	"core",
 	func(l *loader) error {
 		if l.loaded == nil {
 			l.loaded = make(map[string]pluginCmd)
-			for k, fn := range builtins.BuiltIns {
+			for k, fn := range core.Core {
 				l.loaded[k] = fn
 			}
 		}
@@ -263,7 +253,7 @@ var BuiltIns *loader = &loader{
 		for k, _ := range l.loaded {
 			res = append(res, k)
 		}
-		ret["builtins"] = res
+		ret["core"] = res
 		return ret, nil
 	},
 	nil,

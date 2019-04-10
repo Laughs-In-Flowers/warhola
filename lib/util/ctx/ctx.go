@@ -14,6 +14,8 @@ type Ctx struct {
 	log.Logger
 	Debug    bool
 	DebugMap map[string]string
+	File     string
+	Geometry string
 }
 
 func Is(c context.Context) *Ctx {
@@ -21,8 +23,10 @@ func Is(c context.Context) *Ctx {
 	l := Log(c)
 	d := Debug(c)
 	dm := DebugMap(c)
+	f := File(c)
+	g := Geometry(c)
 	return &Ctx{
-		cv, l, d, dm,
+		cv, l, d, dm, f, g,
 	}
 }
 
@@ -68,4 +72,20 @@ func Canvas(c context.Context) canvas.Canvas {
 		return cvv
 	}
 	return nil
+}
+
+func File(c context.Context) string {
+	f := c.Value(3)
+	if ff, ok := f.(string); ok {
+		return ff
+	}
+	return ""
+}
+
+func Geometry(c context.Context) string {
+	g := c.Value(4)
+	if gg, ok := g.(string); ok {
+		return gg
+	}
+	return ""
 }

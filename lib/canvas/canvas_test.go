@@ -11,8 +11,6 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"golang.org/x/image/math/fixed"
 )
 
 func init() {
@@ -29,7 +27,7 @@ var (
 func TestCanvas(t *testing.T) {
 	setup(t)
 	for _, m := range AvailableColorModels {
-		for _, k := range AvailableKind {
+		for _, k := range AvailableFileType {
 			model := m.String()
 			kind := k.String()
 			name := fmt.Sprintf("cnv-%s.%s", model, kind)
@@ -62,7 +60,7 @@ func probeCanvas(t *testing.T, c *testCanvas) {
 	probeIdentity(t, c)
 	probePxl(t, c)
 	probeEqual(t, c)
-	probeTransformer(t, c)
+	//probeTransformer(t, c)
 }
 
 func probeIdentity(t *testing.T, c *testCanvas) {
@@ -111,13 +109,13 @@ func probeIdentity(t *testing.T, c *testCanvas) {
 	}
 
 	// kind
-	ck := cnv.Kind()
-	if ck != c.kind {
+	ck := cnv.FileType()
+	if ck != c.fileType {
 		failProbe(
 			t,
 			c.id,
 			commonExpect,
-			c.kind, ck,
+			c.fileType, ck,
 		)
 	}
 }
@@ -241,20 +239,25 @@ func probeAt(
 func probePix(t *testing.T, c *testCanvas) {
 	o := c.original.c
 
-	// get/set one pix item
-	op := o.Pix(1)
-	np := op + 5
-	o.SetPix(1, np)
-	tp := o.Pix(1)
-	if tp != np {
-		failProbe(
-			t,
-			c.id,
-			"Pix.Get/Pix.Set",
-			"unable to properly set and get pix",
-		)
-	}
-	o.SetPix(1, op)
+	// get/set pix
+	// opx := o.Pix()
+
+	// cpx := opx
+	// o.SetPix(cpx)
+
+	//op := o.Pix(1)
+	//np := op + 5
+	//o.SetPix(1, np)
+	//tp := o.Pix(1)
+	//if tp != np {
+	//	failProbe(
+	//		t,
+	//		c.id,
+	//		"Pix.Get/Pix.Set",
+	//		"unable to properly set and get pix",
+	//	)
+	//}
+	//o.SetPix(opx)
 
 	// stride
 	str := o.Stride()
@@ -513,28 +516,28 @@ func probePaster(t *testing.T, c *testCanvas) {
 	probeAt(t, c.id, c.overlay.c, c.overPs, defaultColorCompare)
 }
 
-func probeTransformer(t *testing.T, c *testCanvas) {
-	probeCropper(t, c)
-	probeResizer(t, c)
-	probeTranslater(t, c)
-}
+//func probeTransformer(t *testing.T, c *testCanvas) {
+//	probeCropper(t, c)
+//	probeResizer(t, c)
+//	probeTranslater(t, c)
+//}
 
-func probeCropper(t *testing.T, c *testCanvas) {
-	cropped := c.crop.c.Bounds()
-	if c.sub.Size() != cropped.Size() {
-		failProbe(
-			t,
-			c.id,
-			"Crop",
-			commonExpect,
-			c.sub, cropped,
-		)
-	}
-}
+//func probeCropper(t *testing.T, c *testCanvas) {
+//	cropped := c.crop.c.Bounds()
+//	if c.sub.Size() != cropped.Size() {
+//		failProbe(
+//			t,
+//			c.id,
+//			"Crop",
+//			commonExpect,
+//			c.sub, cropped,
+//		)
+//	}
+//}
 
-func probeResizer(t *testing.T, c *testCanvas) {}
+//func probeResizer(t *testing.T, c *testCanvas) {}
 
-func probeTranslater(t *testing.T, c *testCanvas) {}
+//func probeTranslater(t *testing.T, c *testCanvas) {}
 
 var commonExpect string = "expected %v, got %v"
 
@@ -564,13 +567,13 @@ type testCanvas struct {
 	id                        string
 	model                     string
 	color                     color.Model
-	path, kind, ppu           string
+	path, fileType, ppu       string
 	pp, opacity               float64
 	dX, dY                    int
 	rect, sub                 image.Rectangle
 	ps, pastePs, overPs       []*testPoint
 	original, existing, clone *tcInstance
-	paste, overlay, crop      *tcInstance
+	paste, overlay            *tcInstance
 }
 
 type tcInstance struct {
@@ -673,12 +676,11 @@ func randMointsOneUnitApart(r image.Rectangle, d float64) (MointFunc, MointFunc)
 	return af, bf
 }
 
-func newTestCanvas(model, path, kind, ppu string, pp float64, dX, dY int, t *testing.T) *testCanvas {
+func newTestCanvas(model, path, fileType, ppu string, pp float64, dX, dY int, t *testing.T) *testCanvas {
 	o, nErr := New(
-		SetDebug(true),
 		SetColorModel(model),
-		SetPath(path),
-		SetKind(kind),
+		SetPath(path, ""),
+		SetFileType(fileType),
 		SetMeasure(pp, ppu),
 		SetRect(dX, dY),
 	)
@@ -714,7 +716,7 @@ func newTestCanvas(model, path, kind, ppu string, pp float64, dX, dY int, t *tes
 		model,
 		o.ColorModel(),
 		path,
-		kind,
+		fileType,
 		ppu,
 		pp,
 		rr.Float64() * 100,
@@ -728,14 +730,12 @@ func newTestCanvas(model, path, kind, ppu string, pp float64, dX, dY int, t *tes
 		nil,
 		nil,
 		nil,
-		nil,
 	}
 
 	x, xErr := New(
-		SetDebug(true),
 		SetColorModel(tc.model),
-		SetPath(tc.path),
-		SetKind(tc.kind),
+		SetPath(tc.path, ""),
+		SetFileType(tc.fileType),
 		SetMeasure(tc.pp, tc.ppu),
 		SetRect(tc.dX, tc.dY),
 	)
@@ -772,199 +772,10 @@ func newTestCanvas(model, path, kind, ppu string, pp float64, dX, dY int, t *tes
 	tc.overPs = ovrSet
 
 	// cropper
-	cc, _ := o.CropTo(subrect)
-	tc.crop = &tcInstance{"crop", cc}
+	//cc, _ := o.CropTo(subrect)
+	//tc.crop = &tcInstance{"crop", cc}
 
 	//create paletted and uniform to open
 
 	return tc
-}
-
-func TestMoint(t *testing.T) {
-	id := "Moint"
-	a := Moint{0, 0}
-
-	// Fixed
-	f := fixed.Point26_6{0, 0}
-	if a.Fixed() != f {
-		failProbe(
-			t,
-			id,
-			"Fixed",
-			commonExpect,
-			a, f,
-		)
-	}
-
-	b := Moint{50, 100}
-
-	// Distance
-	expD := math.Hypot(a.X-b.X, a.Y-b.Y)
-	if dis := a.Distance(b); dis != expD {
-		failProbe(
-			t,
-			id,
-			"Distance",
-			commonExpect,
-			dis, expD,
-		)
-	}
-
-	// Interpolate
-	intp := float64(rr.Intn(100))
-	interpExp := Moint{
-		a.X + (b.X-a.X)*intp,
-		a.Y + (b.Y-a.Y)*intp,
-	}
-	if interpHave := a.Interpolate(b, intp); interpHave != interpExp {
-		failProbe(
-			t,
-			id,
-			"Interpolate",
-			commonExpect,
-			interpHave, interpExp,
-		)
-	}
-
-	iz := image.Point{0, 0}
-
-	// IPoint() image.Point {
-	pointExp := iz
-	if pointHave := a.IPoint(); pointHave != pointExp {
-		failProbe(
-			t,
-			id,
-			"IPoint",
-			commonExpect,
-			pointHave, pointExp,
-		)
-	}
-
-	// ToMoint(ip image.Point) Moint {
-	if toMointHave := ToMoint(iz); toMointHave != a {
-		failProbe(
-			t,
-			"-",
-			"ToMoint",
-			commonExpect,
-			toMointHave, a,
-		)
-	}
-
-	// Add
-	am := Moint{float64(rr.Intn(500)), float64(rr.Intn(500))}
-	addExp := Moint{a.X + am.X, a.Y + am.Y}
-	if addHave := a.Add(am); addHave != addExp {
-		failProbe(
-			t,
-			id,
-			"Add",
-			commonExpect,
-			addHave, addExp,
-		)
-	}
-
-	// Div
-	divV := float64(rr.Intn(10))
-	divExp := Moint{b.X / divV, b.Y / divV}
-	if divHave := b.Div(divV); divHave != divExp {
-		failProbe(
-			t,
-			id,
-			"Div",
-			commonExpect,
-			divHave, divExp,
-		)
-	}
-
-	// Eq(o Moint) bool {
-	eqM := Moint{0, 0}
-	if !a.Eq(eqM) {
-		failProbe(
-			t,
-			id,
-			"Eq",
-			commonExpect,
-			eqM, a,
-		)
-	}
-
-	irect := image.Rect(0, 0, 51, 101)
-
-	// In
-	rmX, rmY := float64(irect.Min.X), float64(irect.Min.Y)
-	rxX, rxY := float64(irect.Max.X), float64(irect.Max.Y)
-	isIn := rmX <= b.X && b.X < rxX &&
-		rmY <= b.Y && b.Y < rxY
-	if isIn != b.In(irect) {
-		failProbe(
-			t,
-			id,
-			"In",
-			"%s is not in %s",
-			b, irect,
-		)
-	}
-
-	// Mod
-	// warning label on this section; still a ?
-	rMin := ToMoint(irect.Min)
-	w, h := float64(irect.Dx()), float64(irect.Dy())
-	p := b.Sub(rMin)
-	p.X = math.Mod(p.X, w)
-	if p.X < 0 {
-		p.X += w
-	}
-	p.Y = math.Mod(p.Y, h)
-	if p.Y < 0 {
-		p.Y += h
-	}
-	modExp := p.Add(rMin)
-	if modHave := b.Mod(irect); modHave != modExp {
-		failProbe(
-			t,
-			id,
-			"Mod",
-			commonExpect,
-			modHave, modExp,
-		)
-	}
-
-	// Mul
-	mulV := float64(rr.Intn(100) + 1)
-	mulExp := Moint{b.X * mulV, b.Y * mulV}
-	if mulHave := b.Mul(mulV); mulHave != mulExp {
-		failProbe(
-			t,
-			id,
-			"Mul",
-			commonExpect,
-			mulHave, mulExp,
-		)
-	}
-
-	// String()
-	stringExp := "(0.0000,0.0000)"
-	if stringHave := a.String(); stringHave != stringExp {
-		failProbe(
-			t,
-			id,
-			"String",
-			commonExpect,
-			stringHave, stringExp,
-		)
-	}
-
-	// Sub(o Moint) Moint {
-	subMoint := Moint{float64(rr.Intn(10)), float64(rr.Intn(10))}
-	subExp := Moint{b.X - subMoint.X, b.Y - subMoint.Y}
-	if subHave := b.Sub(subMoint); subHave != subExp {
-		failProbe(
-			t,
-			id,
-			"Sub",
-			commonExpect,
-			subHave, subExp,
-		)
-	}
 }

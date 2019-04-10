@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/Laughs-In-Flowers/log"
-	"github.com/Laughs-In-Flowers/warhola/lib/util/xrr"
+	"github.com/Laughs-In-Flowers/xrr"
 )
 
 type ConfigFn func(*canvas) error
@@ -111,19 +111,16 @@ func (c *configuration) Configured() bool {
 
 var builtIns = []Config{
 	config{0, setUp},
-
 	config{1000, checkLogger},
-	config{1001, checkDebug},
 	config{1002, checkColorModel},
 	config{1003, checkPath},
-	config{1004, checkKind},
+	config{1004, checkFileType},
 	config{1005, checkRect},
 	config{1006, checkMeasure},
 	config{1007, newAction},
 	config{1008, checkAction},
 	config{1009, action},
 	config{1010, checkPalette},
-
 	config{9999, tearDown},
 }
 
@@ -171,19 +168,6 @@ func checkLogger(c *canvas) error {
 	return nil
 }
 
-func SetDebug(d bool) Config {
-	return NewConfig(1,
-		func(c *canvas) error {
-			c.debug = d
-			return nil
-		})
-}
-
-func checkDebug(c *canvas) error {
-	expected.addUn("canvas debug is %t", c.debug)
-	return nil
-}
-
 func SetColorModel(m string) Config {
 	return NewConfig(2,
 		func(c *canvas) error {
@@ -197,50 +181,59 @@ func checkColorModel(c *canvas) error {
 	return nil
 }
 
-func setPath(c *canvas, path string) {
-	c.path = path
+var (
+	inPath  string = PATHNOOP
+	outPath string = PATHNOOP
+)
+
+func setPath(c *canvas, in, out string) {
+	if in != "" {
+		inPath = in
+	}
+	c.path = in
+	if out != "" {
+		outPath = out
+	}
 }
 
-func SetPath(p string) Config {
+func SetPath(in, out string) Config {
 	return NewConfig(3,
 		func(c *canvas) error {
-			setPath(c, p)
+			setPath(c, in, out)
 			return nil
 		})
 }
 
 func checkPath(c *canvas) error {
-	expected.add("path is %s", c.path)
+	expected.add("in path is %s", c.path)
+	if outPath != PATHNOOP {
+		expected.add("out path is %s", outPath)
+	}
 	return nil
 }
 
-func SetKind(k string) Config {
+func SetFileType(k string) Config {
 	return NewConfig(4,
 		func(c *canvas) error {
-			c.kind = stringToKind(k)
+			c.fileType = stringToFileType(k)
 			return nil
 		})
 }
 
-func checkKind(c *canvas) error {
-	expected.add("kind is %s", c.kind)
+func checkFileType(c *canvas) error {
+	expected.add("filetype is %s", c.fileType)
 	return nil
 }
 
 func SetRect(x, y int) Config {
 	return NewConfig(5,
 		func(c *canvas) error {
-			c.rect = image.Rect(0, 0, x, y)
+			c.pxl.rect = image.Rect(0, 0, x, y)
 			return nil
 		})
 }
 
-var ZeroRectError = xrr.Xrror("rectangle is zero rectangle")
-
 func checkRect(c *canvas) error {
-	if c.pxl.rect == image.ZR {
-		return ZeroRectError
-	}
 	expected.add("rectangle dimensions are min %v max %v", c.rect.Min, c.rect.Max)
 	return nil
 }
@@ -285,40 +278,43 @@ func checkAction(c *canvas) error {
 		case c.path == PATHNOOP:
 			results.addUn("noop path is %s", PATHNOOP)
 			return noopError(PATHNOOP)
-		case c.kind == KINDNOOP:
-			results.addUn("noop kind is %s", KINDNOOP)
-			return noopError(KINDNOOP)
+		case c.fileType == FILETYPENOOP:
+			results.addUn("noop filetype is %s", FILETYPENOOP)
+			return noopError(FILETYPENOOP)
 		case c.action == ACTIONNOOP:
 			results.add("noop action is %s", ACTIONNOOP)
 			return noopError(ACTIONNOOP)
 		}
 	}
-	expected.add("action: %s, %s, %s, %s", c.action, c.pxl.m, c.path, c.kind)
+	expected.add("action: %s, %s, %s, %s", c.action, c.pxl.m, c.path, c.fileType)
 	return nil
 }
 
 func action(c *canvas) error {
 	var err error
-	var nk Kind
+	var nk FileType
 	var cm ColorModel
 	switch c.action {
 	case ACTIONNEW:
 		err = newTo(c.pxl)
-		nk, cm = c.kind, c.m
+		nk, cm = c.fileType, c.m
 	case ACTIONOPEN:
 		nk, cm, err = openTo(c.path, c.pxl)
-		c.kind = nk
+		c.fileType = nk
 	default:
 		err = noopError(ACTIONNOOP)
+	}
+	if outPath != PATHNOOP {
+		c.SetPath(outPath)
 	}
 	if err != nil {
 		c.Printf("unable to perform action: %s", c.action)
 	}
 	results.add("color model is %s", cm)
 	results.add("path is %s", c.path)
-	results.add("kind is %s", nk)
+	results.add("filetype is %s", nk)
 	results.add("rectangle dimensions are min %v max %v", c.rect.Min, c.rect.Max)
-	results.add("action: %s, %s, %s, %s", c.action, cm, c.path, nk)
+	results.add("action:\t%s\t%s\tin:%s\tout:%s\t%s", c.action, cm, inPath, outPath, nk)
 	return err
 }
 
@@ -343,13 +339,11 @@ func SetPaletteFn(fn PaletteFunc) Config {
 }
 
 func tearDown(c *canvas) error {
-	if c.debug {
-		for _, v := range expected.has {
-			c.Print(v)
-		}
-		for _, v := range results.has {
-			c.Print(v)
-		}
+	for _, v := range expected.has {
+		c.Print(v)
+	}
+	for _, v := range results.has {
+		c.Print(v)
 	}
 	expected, results = nil, nil
 	return nil

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Laughs-In-Flowers/warhola/lib/util/mth"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -197,17 +198,9 @@ type Moint struct {
 
 var ZM Moint = Moint{0, 0}
 
-func fixp(x, y float64) fixed.Point26_6 {
-	return fixed.Point26_6{fix(x), fix(y)}
-}
-
-func fix(x float64) fixed.Int26_6 {
-	return fixed.Int26_6(x * 64)
-}
-
 // Returns a fixed.Point26_6 representation of Point.
 func (p Moint) Fixed() fixed.Point26_6 {
-	return fixp(p.X, p.Y)
+	return mth.Fixp(p.X, p.Y)
 }
 
 // Returns the distance from point to other point.

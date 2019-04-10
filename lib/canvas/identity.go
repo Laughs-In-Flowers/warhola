@@ -1,26 +1,20 @@
 package canvas
 
-import (
-	"strings"
-
-	"github.com/Laughs-In-Flowers/warhola/lib/util/xrr"
-)
-
 type Identity interface {
 	Pather
 	Action() string
-	Kind() string
+	FileType() string
 }
 
 type identity struct {
 	*pather
-	action Action
-	kind   Kind
+	action   Action
+	fileType FileType
 }
 
 func newIdentity() *identity {
 	return &identity{
-		&pather{""}, ACTIONNOOP, KINDNOOP,
+		&pather{""}, ACTIONNOOP, FILETYPENOOP,
 	}
 }
 
@@ -78,50 +72,12 @@ const (
 	ACTIONCLONE
 )
 
-// Indicates the type of file the canvas is.
-type Kind int
-
-func (i *identity) Kind() string {
-	return i.kind.String()
+func (i *identity) FileType() string {
+	return i.fileType.String()
 }
-
-const (
-	KINDNOOP Kind = iota
-	PNG
-	JPG
-)
-
-//A variable containing a listing of available and fully functional Kind.
-var AvailableKind = []Kind{
-	PNG,
-	JPG,
-}
-
-func stringToKind(s string) Kind {
-	switch strings.ToUpper(s) {
-	case "PNG":
-		return PNG
-	case "JPEG", "JPG":
-		return JPG
-	}
-	return KINDNOOP
-}
-
-// Provides a string of this Kind.
-func (k Kind) String() string {
-	switch k {
-	case PNG:
-		return "png"
-	case JPG:
-		return "jpg"
-	}
-	return "KindNoop"
-}
-
-var kindError = xrr.Xrror("%s is not a recognized image kind").Out
 
 func (i *identity) clone() *identity {
 	return &identity{
-		i.pather.clone(), ACTIONCLONE, i.kind,
+		i.pather.clone(), ACTIONCLONE, i.fileType,
 	}
 }
